@@ -1,0 +1,36 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "sync-prices": "tsx scripts/sync-prices.ts",
+    "sync-news": "tsx scripts/sync-news.ts",
+    "fetch-snapshots": "tsx scripts/fetch-all-snapshots.ts",
+    "warm-cache": "tsx scripts/warm-snapshots.ts",
+    "deploy:contract": "bash scripts/deploy-contract.sh",
+    "deploy:vault": "bash scripts/deploy-vault.sh"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
+    "next": "16.2.9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "viem": "^2.52.2",
+    "wagmi": "^3.6.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.9",
+    "tailwindcss": "^4",
+    "tsx": "^4.22.4",
+    "typescript": "^5"
+  }
+}
