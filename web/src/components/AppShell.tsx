@@ -115,6 +115,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/" || pathname.startsWith("/stock/");
+    if (href === "/news") return pathname === "/news" || pathname.startsWith("/news/");
     return pathname.startsWith(href);
   };
 

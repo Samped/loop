@@ -66,11 +66,16 @@ export function getNewsStoreUpdatedAt(): number {
   return updatedAt;
 }
 
-export function getStoredNewsArticles(limit = 50): StoredNewsArticle[] {
+export function getStoredNewsArticles(limit = 500): StoredNewsArticle[] {
   ensureHydrated();
   return [...articles]
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, limit);
+}
+
+export function getStoredNewsArticle(id: string): StoredNewsArticle | null {
+  ensureHydrated();
+  return articles.find((a) => a.id === id) ?? null;
 }
 
 export function getStoredNewsForTicker(ticker: string, limit = 20): StoredNewsArticle[] {
@@ -120,7 +125,18 @@ export function upsertNewsArticles(incoming: StoredNewsArticle[]) {
     const existing = byId.get(article.id);
     if (existing) {
       const mergedTickers = [...new Set([...existing.tickers, ...article.tickers])];
-      const merged = { ...existing, ...article, tickers: mergedTickers };
+      const candidates = [article.content, existing.content, existing.summary, existing.title, article.summary];
+      const content = candidates
+        .map((v) => v?.trim() ?? "")
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length)[0] ?? "";
+      const merged = {
+        ...existing,
+        ...article,
+        tickers: mergedTickers,
+        content,
+        summary: article.summary || existing.summary,
+      };
       byId.set(article.id, merged);
       indexArticle(merged, nextByTicker);
     } else {

@@ -13,7 +13,7 @@ export async function GET(
   hydrateSnapshotStore();
   hydrateNewsStore();
 
-  const articles = getStoredNewsForTicker(upper, 15).map(storedToNewsItem);
+  const articles = getStoredNewsForTicker(upper, 50).map(storedToNewsItem);
 
   return NextResponse.json({
     ticker: upper,

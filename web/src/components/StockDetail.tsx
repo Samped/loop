@@ -7,6 +7,7 @@ import type { NewsItem } from "@/lib/news";
 import { PriceChart } from "@/components/PriceChart";
 import { StockOverview } from "@/components/StockOverview";
 import { TradePanel } from "@/components/TradePanel";
+import { NewsFeed } from "@/components/NewsFeed";
 
 export function StockDetail({ ticker }: { ticker: string }) {
   const upper = ticker.toUpperCase();
@@ -56,7 +57,7 @@ export function StockDetail({ ticker }: { ticker: string }) {
 
   useEffect(() => {
     setNewsLoading(true);
-    fetch(`/api/news/${upper}`)
+    fetch(`/api/news/stock/${upper}`)
       .then((r) => r.json())
       .then((data) => setNews(data.items ?? []))
       .finally(() => setNewsLoading(false));
@@ -112,44 +113,19 @@ export function StockDetail({ ticker }: { ticker: string }) {
 
               <StockOverview stock={stockInfo} snapshot={snapshot} />
 
-              <div className="glass-card rounded-2xl p-5 sm:p-6">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-zinc-200">{upper} news</h3>
-                  <Link href="/news" className="text-xs text-zinc-500 hover:text-zinc-300">
-                    All news →
+              <div>
+                <div className="mb-3 flex items-center justify-between px-1">
+                  <h3 className="text-sm font-medium text-zinc-300">{upper} news</h3>
+                  <Link href="/news" className="text-[11px] text-zinc-600 hover:text-zinc-400">
+                    All news
                   </Link>
                 </div>
-
-                {newsLoading ? (
-                  <p className="text-sm text-zinc-500">Loading headlines…</p>
-                ) : news.length === 0 ? (
-                  <p className="text-sm text-zinc-500">
-                    No recent articles for {upper}. Headlines sync in the background.
-                  </p>
-                ) : (
-                  <div className="space-y-4">
-                    {news.slice(0, 5).map((item) => (
-                      <div key={item.id} className="border-b border-white/[0.06] pb-4 last:border-0 last:pb-0">
-                        {item.url ? (
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-zinc-200 hover:text-emerald-300"
-                          >
-                            {item.title}
-                          </a>
-                        ) : (
-                          <p className="text-sm font-medium text-zinc-200">{item.title}</p>
-                        )}
-                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-500">{item.summary}</p>
-                        <p className="mt-1 text-[11px] text-zinc-600">
-                          {item.author ?? "SoSoValue"}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <NewsFeed
+                  items={news.slice(0, 5)}
+                  loading={newsLoading}
+                  compact
+                  emptyMessage={`No recent headlines for ${upper}.`}
+                />
               </div>
             </div>
 

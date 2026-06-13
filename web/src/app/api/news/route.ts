@@ -94,13 +94,17 @@ export async function GET() {
   hydrateNewsStore();
   startNewsSyncer();
 
-  let stored = getStoredNewsArticles(40).map(storedToNewsItem);
+  let stored = getStoredNewsArticles(500)
+    .map(storedToNewsItem)
+    .filter((item) => item.category === "article" || item.source === "sosovalue");
 
   if (stored.length === 0 && process.env.SOSOVALUE_API_KEY) {
     if (!emptyStoreSyncStarted) {
       emptyStoreSyncStarted = true;
       await syncNewsNow({ tickerSearch: false });
-      stored = getStoredNewsArticles(40).map(storedToNewsItem);
+      stored = getStoredNewsArticles(500)
+        .map(storedToNewsItem)
+        .filter((item) => item.category === "article" || item.source === "sosovalue");
     }
   }
 

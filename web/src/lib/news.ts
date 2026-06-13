@@ -6,6 +6,7 @@ export type NewsItem = {
   category: "article" | "sector" | "stock" | "market";
   title: string;
   summary: string;
+  content?: string;
   ticker?: string;
   tickers?: string[];
   changePct?: number;
@@ -19,6 +20,7 @@ export type StoredNewsArticle = {
   id: string;
   title: string;
   summary: string;
+  content: string;
   author: string;
   url: string;
   timestamp: number;
@@ -50,14 +52,25 @@ export function articleTimestamp(article: SosoNewsArticle): number {
 }
 
 export function articleTitle(article: SosoNewsArticle): string {
-  if (article.title) return stripHtml(article.title);
+  if (article.title) {
+    const title = stripHtml(article.title);
+    if (title.length <= 120) return title;
+    const first = title.split(/[.!?\n]/)[0]?.trim();
+    return first && first.length > 10 ? first.slice(0, 120) : title.slice(0, 120);
+  }
   const text = stripHtml(article.content ?? "");
   if (!text) return "Untitled";
   const first = text.split(/[.!?\n]/)[0]?.trim();
-  return first && first.length > 10 ? first.slice(0, 160) : text.slice(0, 160);
+  return first && first.length > 10 ? first.slice(0, 120) : text.slice(0, 120);
 }
 
-export function articleSummary(article: SosoNewsArticle, maxLen = 280): string {
+export function articleBody(article: SosoNewsArticle): string {
+  const fromContent = stripHtml(article.content ?? "");
+  if (fromContent) return fromContent;
+  return stripHtml(article.title ?? "");
+}
+
+export function articleSummary(article: SosoNewsArticle, maxLen = 200): string {
   const text = stripHtml(article.content ?? article.title ?? "");
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen).trim()}…`;
@@ -114,6 +127,7 @@ export function normalizeSosoArticle(article: SosoNewsArticle, catalog: CryptoSt
     id: article.id,
     title: articleTitle(article),
     summary: articleSummary(article),
+    content: articleBody(article),
     author: article.author || article.nick_name || "SoSoValue",
     url,
     timestamp: articleTimestamp(article),
@@ -122,11 +136,13 @@ export function normalizeSosoArticle(article: SosoNewsArticle, catalog: CryptoSt
 }
 
 export function storedToNewsItem(article: StoredNewsArticle): NewsItem {
+  const body = article.content || article.summary || article.title;
   return {
     id: article.id,
     category: "article",
     title: article.title,
     summary: article.summary,
+    content: body,
     ticker: article.tickers[0],
     tickers: article.tickers,
     timestamp: article.timestamp,
@@ -134,4 +150,25 @@ export function storedToNewsItem(article: StoredNewsArticle): NewsItem {
     author: article.author,
     source: "sosovalue",
   };
+}
+
+export function formatNewsDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function timeAgo(ts: number): string {
+  const mins = Math.floor((Date.now() - ts) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  return formatNewsDate(ts);
 }
