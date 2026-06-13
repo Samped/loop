@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import type { NewsItem } from "@/lib/news";
-import { storedToNewsItem } from "@/lib/news";
-import { getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
+import { mixNewsFeed, storedToNewsItem } from "@/lib/news";
+import { getProviderCounts, getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
 import { getNewsSyncStatus, startNewsSyncer, syncNewsNow } from "@/lib/news-syncer";
 import { getStoredKlines, getStoredSnapshots, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { filterListedSnapshots } from "@/lib/stock-ready";
@@ -96,27 +96,33 @@ export async function GET() {
 
   let stored = getStoredNewsArticles(500)
     .map(storedToNewsItem)
-    .filter((item) => item.category === "article" || item.source === "sosovalue");
+    .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
 
-  if (stored.length === 0 && process.env.SOSOVALUE_API_KEY) {
+  if (
+    stored.length === 0 &&
+    (process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY)
+  ) {
     if (!emptyStoreSyncStarted) {
       emptyStoreSyncStarted = true;
       await syncNewsNow({ tickerSearch: false });
       stored = getStoredNewsArticles(500)
         .map(storedToNewsItem)
-        .filter((item) => item.category === "article" || item.source === "sosovalue");
+        .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
     }
   }
 
-  const hasApiKey = Boolean(process.env.SOSOVALUE_API_KEY);
-  const synthetic = !hasApiKey && stored.length === 0 ? await buildSyntheticNews() : [];
-  const items = [...stored, ...synthetic].sort((a, b) => b.timestamp - a.timestamp);
+  const hasNewsKeys = Boolean(
+    process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,
+  );
+  const synthetic = !hasNewsKeys && stored.length === 0 ? await buildSyntheticNews() : [];
+  const items = mixNewsFeed([...stored, ...synthetic], 300);
   const status = getNewsSyncStatus();
 
   return NextResponse.json({
     items,
-    source: stored.length ? "sosovalue" : hasApiKey ? "syncing" : "synthetic",
+    source: stored.length ? "multi" : hasNewsKeys ? "syncing" : "synthetic",
     articleCount: stored.length,
+    providerCounts: getProviderCounts(),
     sync: status,
   });
 }

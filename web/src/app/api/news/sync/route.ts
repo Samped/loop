@@ -3,8 +3,11 @@ import { getNewsSyncStatus, syncNewsNow } from "@/lib/news-syncer";
 import { getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
 
 export async function POST() {
-  if (!process.env.SOSOVALUE_API_KEY) {
-    return NextResponse.json({ error: "SOSOVALUE_API_KEY not configured" }, { status: 503 });
+  const hasSource = Boolean(
+    process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,
+  );
+  if (!hasSource) {
+    return NextResponse.json({ error: "No news API keys configured" }, { status: 503 });
   }
 
   hydrateNewsStore();

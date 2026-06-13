@@ -1,5 +1,9 @@
+import type { CryptoPanicPost } from "@/lib/cryptopanic";
+import type { FinnhubNewsArticle } from "@/lib/finnhub";
 import type { CryptoStock } from "@/lib/sosovalue";
 import type { SosoNewsArticle } from "@/lib/sosovalue";
+
+export type NewsProvider = "sosovalue" | "finnhub" | "cryptopanic" | "markets" | "crypto";
 
 export type NewsItem = {
   id: string;
@@ -13,7 +17,7 @@ export type NewsItem = {
   timestamp: number;
   url?: string;
   author?: string;
-  source?: "sosovalue" | "synthetic";
+  source?: NewsProvider | "synthetic";
 };
 
 export type StoredNewsArticle = {
@@ -25,21 +29,29 @@ export type StoredNewsArticle = {
   url: string;
   timestamp: number;
   tickers: string[];
+  provider: NewsProvider;
 };
 
-export function stripHtml(html: string): string {
+export function decodeHtmlEntities(html: string): string {
   return html
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<img[^>]*>/gi, "")
-    .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
+export function stripHtml(html: string): string {
+  let text = decodeHtmlEntities(html);
+  text = text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<img[^>]*>/gi, "")
+    .replace(/<a[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<[^>]+>/g, "");
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export function articleUrl(article: SosoNewsArticle): string {
@@ -76,6 +88,28 @@ export function articleSummary(article: SosoNewsArticle, maxLen = 200): string {
   return `${text.slice(0, maxLen).trim()}…`;
 }
 
+const CRYPTO_CURRENCY_TICKERS: Record<string, string[]> = {
+  BTC: ["MSTR", "COIN", "HOOD"],
+  ETH: ["COIN"],
+  SOL: ["COIN"],
+};
+
+export function matchTextToTickers(text: string, catalog: CryptoStock[], extraTickers: string[] = []): string[] {
+  const matched = new Set<string>(extraTickers.map((t) => t.toUpperCase()));
+  const tickerSet = new Set(catalog.map((s) => s.ticker.toUpperCase()));
+  const haystack = text.toLowerCase();
+
+  for (const stock of catalog) {
+    const ticker = stock.ticker.toUpperCase();
+    const name = stock.name.toLowerCase();
+    const tickerRe = new RegExp(`\\b${ticker}\\b`, "i");
+    if (tickerRe.test(haystack)) matched.add(ticker);
+    else if (name.length >= 4 && haystack.includes(name)) matched.add(ticker);
+  }
+
+  return [...matched].filter((t) => tickerSet.has(t));
+}
+
 export function matchArticleTickers(article: SosoNewsArticle, catalog: CryptoStock[]): string[] {
   const matched = new Set<string>();
   const tickerSet = new Set(catalog.map((s) => s.ticker.toUpperCase()));
@@ -92,20 +126,10 @@ export function matchArticleTickers(article: SosoNewsArticle, catalog: CryptoSto
     ...(article.tags ?? []),
     article.author ?? "",
   ]
-    .join(" ")
-    .toLowerCase();
+    .join(" ");
 
-  for (const stock of catalog) {
-    const ticker = stock.ticker.toUpperCase();
-    const name = stock.name.toLowerCase();
-    const tickerRe = new RegExp(`\\b${ticker}\\b`, "i");
-    if (tickerRe.test(haystack)) {
-      matched.add(ticker);
-      continue;
-    }
-    if (name.length >= 4 && haystack.includes(name)) {
-      matched.add(ticker);
-    }
+  for (const ticker of matchTextToTickers(haystack, catalog)) {
+    matched.add(ticker);
   }
 
   for (const tag of article.tags ?? []) {
@@ -132,6 +156,58 @@ export function normalizeSosoArticle(article: SosoNewsArticle, catalog: CryptoSt
     url,
     timestamp: articleTimestamp(article),
     tickers: matchArticleTickers(article, catalog),
+    provider: "sosovalue",
+  };
+}
+
+export function normalizeFinnhubArticle(
+  article: FinnhubNewsArticle,
+  ticker: string,
+  catalog: CryptoStock[],
+): StoredNewsArticle | null {
+  if (!article.url || !article.headline) return null;
+
+  const body = stripHtml(article.summary || article.headline);
+  const summary = body.length <= 200 ? body : `${body.slice(0, 200).trim()}…`;
+  const upper = ticker.toUpperCase();
+  const tickers = matchTextToTickers(`${article.headline} ${body}`, catalog, [upper]);
+
+  return {
+    id: `finnhub-${article.id}`,
+    title: stripHtml(article.headline),
+    summary,
+    content: body,
+    author: article.source || "Finnhub",
+    url: article.url,
+    timestamp: article.datetime * 1000,
+    tickers: tickers.length ? tickers : [upper],
+    provider: "finnhub",
+  };
+}
+
+export function normalizeCryptoPanicPost(post: CryptoPanicPost, catalog: CryptoStock[]): StoredNewsArticle | null {
+  if (!post.url || !post.title) return null;
+
+  const title = stripHtml(post.title);
+  const extra: string[] = [];
+  for (const currency of post.currencies ?? []) {
+    const hints = CRYPTO_CURRENCY_TICKERS[currency.code.toUpperCase()] ?? [];
+    extra.push(...hints);
+  }
+
+  const tickers = matchTextToTickers(title, catalog, extra);
+  const summary = title.length <= 200 ? title : `${title.slice(0, 200).trim()}…`;
+
+  return {
+    id: `cryptopanic-${post.id}`,
+    title,
+    summary,
+    content: title,
+    author: post.source?.title || post.source?.domain || "CryptoPanic",
+    url: post.url,
+    timestamp: new Date(post.published_at).getTime() || Date.now(),
+    tickers,
+    provider: "cryptopanic",
   };
 }
 
@@ -148,8 +224,25 @@ export function storedToNewsItem(article: StoredNewsArticle): NewsItem {
     timestamp: article.timestamp,
     url: article.url,
     author: article.author,
-    source: "sosovalue",
+    source: article.provider ?? "sosovalue",
   };
+}
+
+export function providerLabel(provider: NewsProvider | "synthetic"): string {
+  switch (provider) {
+    case "finnhub":
+      return "Finnhub";
+    case "cryptopanic":
+      return "CryptoPanic";
+    case "markets":
+      return "Market News";
+    case "crypto":
+      return "Crypto";
+    case "synthetic":
+      return "Synthetic";
+    default:
+      return "SoSoValue";
+  }
 }
 
 export function formatNewsDate(ts: number): string {
@@ -171,4 +264,64 @@ export function timeAgo(ts: number): string {
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d`;
   return formatNewsDate(ts);
+}
+
+const SECONDARY_SOURCES: NewsProvider[] = ["markets", "crypto", "finnhub", "cryptopanic"];
+
+/** Blend SoSoValue with other providers so the feed is not dominated by one source. */
+export function mixNewsFeed(items: NewsItem[], limit = 100): NewsItem[] {
+  const bySource = new Map<string, NewsItem[]>();
+  for (const item of items) {
+    const key = item.source ?? "sosovalue";
+    const list = bySource.get(key) ?? [];
+    list.push(item);
+    bySource.set(key, list);
+  }
+
+  for (const list of bySource.values()) {
+    list.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  const soso = [...(bySource.get("sosovalue") ?? [])];
+  const queues = SECONDARY_SOURCES.map((source) => [...(bySource.get(source) ?? [])]);
+  const hasSecondary = queues.some((q) => q.length > 0);
+
+  if (!hasSecondary) {
+    return [...items].sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
+  }
+
+  const result: NewsItem[] = [];
+  let sosoIdx = 0;
+  let queueIdx = 0;
+
+  while (result.length < limit && (sosoIdx < soso.length || queues.some((q) => q.length > 0))) {
+    for (let i = 0; i < 2 && sosoIdx < soso.length && result.length < limit; i++) {
+      result.push(soso[sosoIdx++]);
+    }
+
+    let inserted = false;
+    for (let attempt = 0; attempt < queues.length && result.length < limit; attempt++) {
+      const queue = queues[(queueIdx + attempt) % queues.length];
+      if (queue.length) {
+        result.push(queue.shift()!);
+        queueIdx = (queueIdx + attempt + 1) % queues.length;
+        inserted = true;
+        break;
+      }
+    }
+
+    if (!inserted && sosoIdx >= soso.length) break;
+  }
+
+  const seen = new Set(result.map((item) => item.id));
+  const remainder = [...queues.flat(), ...soso.slice(sosoIdx)]
+    .filter((item) => !seen.has(item.id))
+    .sort((a, b) => b.timestamp - a.timestamp);
+
+  for (const item of remainder) {
+    if (result.length >= limit) break;
+    result.push(item);
+  }
+
+  return result;
 }

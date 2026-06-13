@@ -86,6 +86,9 @@ export async function resolveNewsArticle(id: string): Promise<NewsItem | null> {
     }
   }
 
-  if (stored) return storedToNewsItem(patchStoredArticle(stored));
+  if (stored) {
+    const item = storedToNewsItem(patchStoredArticle(stored));
+    return item;
+  }
   return null;
 }

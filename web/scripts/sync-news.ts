@@ -30,21 +30,31 @@ async function main() {
   hydrateSnapshotStore();
   hydrateNewsStore();
 
-  console.log("Syncing SoSoValue news…");
+  console.log("Syncing news (SoSoValue + Finnhub + CryptoPanic)…");
   const ingested = await syncNewsNow({ tickerSearch: false });
   const total = getStoredNewsArticles(500).length;
   const status = (await import("../src/lib/news-syncer")).getNewsSyncStatus();
 
   if (total === 0) {
-    console.error("No articles ingested.", status.lastError ?? "Check SOSOVALUE_API_KEY and rate limits.");
+    console.error(
+      "No articles ingested.",
+      status.lastError ?? "Check SOSOVALUE_API_KEY, FINNHUB_API_KEY, or CRYPTOPANIC_API_KEY.",
+    );
     process.exit(1);
   }
 
   console.log(`Ingested ${ingested} articles (${total} total in store)`);
+  if (status.lastIngested) {
+    const parts = Object.entries(status.lastIngested)
+      .filter(([, n]) => n > 0)
+      .map(([source, n]) => `${source}: ${n}`);
+    if (parts.length) console.log(`By source: ${parts.join(", ")}`);
+  }
 
-  const sample = getStoredNewsArticles(3);
-  for (const article of sample) {
-    console.log(`- ${article.title.slice(0, 72)}… (${article.author})`);
+  const sample = getStoredNewsArticles(5).filter((a) => a.provider !== "sosovalue").slice(0, 3);
+  const fallback = sample.length ? sample : getStoredNewsArticles(3);
+  for (const article of fallback) {
+    console.log(`- [${article.provider}] ${article.title.slice(0, 72)}… (${article.author})`);
   }
 }
 

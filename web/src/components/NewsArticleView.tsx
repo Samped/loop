@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { NewsItem } from "@/lib/news";
-import { formatNewsDate } from "@/lib/news";
+import { formatNewsDate, providerLabel } from "@/lib/news";
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -106,7 +106,9 @@ export function NewsArticleView({ article }: { article: NewsItem }) {
       </div>
 
       <footer className="mt-8">
-        <p className="text-[11px] text-zinc-600">Source: SoSoValue</p>
+        <p className="text-[11px] text-zinc-600">
+          Source: {article.source && article.source !== "synthetic" ? providerLabel(article.source) : "SoSoValue"}
+        </p>
       </footer>
     </article>
   );

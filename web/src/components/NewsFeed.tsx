@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { NewsItem } from "@/lib/news";
-import { timeAgo } from "@/lib/news";
+import { providerLabel, timeAgo } from "@/lib/news";
 
 function TickerPills({ tickers, linked = false }: { tickers?: string[]; linked?: boolean }) {
   const valid = tickers?.filter((t) => /^[A-Z]{1,5}$/.test(t));
@@ -82,8 +82,13 @@ function NewsRow({ item, compact = false }: { item: NewsItem; compact?: boolean 
           </p>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {item.author && (
+        {item.author && (
               <span className="hidden text-[11px] text-zinc-600 sm:inline">{item.author}</span>
+            )}
+            {item.source && item.source !== "synthetic" && (
+              <span className="rounded-md bg-white/[0.04] px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+                {providerLabel(item.source)}
+              </span>
             )}
             <TickerPills tickers={item.tickers} />
           </div>

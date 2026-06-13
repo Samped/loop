@@ -1,9 +1,47 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import type { StoredNewsArticle } from "@/lib/news";
+import type { NewsProvider, StoredNewsArticle } from "@/lib/news";
+import { stripHtml } from "@/lib/news";
+import { repairMarketsArticle } from "@/lib/news-rss";
 
 const STORE_PATH = join(process.cwd(), "data", "news.json");
 const MAX_ARTICLES = 500;
+
+/** Keep secondary sources from being evicted by high-volume SoSoValue tweets. */
+const PROVIDER_QUOTAS: Record<NewsProvider, number> = {
+  sosovalue: 280,
+  finnhub: 100,
+  cryptopanic: 50,
+  crypto: 50,
+  markets: 60,
+};
+
+function rebuildByTicker(list: StoredNewsArticle[]): Record<string, string[]> {
+  const next: Record<string, string[]> = {};
+  for (const article of list) {
+    indexArticle(article, next);
+  }
+  return next;
+}
+
+function trimArticles(all: StoredNewsArticle[]): StoredNewsArticle[] {
+  const byProvider = new Map<NewsProvider, StoredNewsArticle[]>();
+
+  for (const article of all) {
+    const provider = article.provider || "sosovalue";
+    const bucket = byProvider.get(provider) ?? [];
+    bucket.push(article);
+    byProvider.set(provider, bucket);
+  }
+
+  const kept: StoredNewsArticle[] = [];
+  for (const [provider, quota] of Object.entries(PROVIDER_QUOTAS) as [NewsProvider, number][]) {
+    const bucket = (byProvider.get(provider) ?? []).sort((a, b) => b.timestamp - a.timestamp);
+    kept.push(...bucket.slice(0, quota));
+  }
+
+  return kept.sort((a, b) => b.timestamp - a.timestamp).slice(0, MAX_ARTICLES);
+}
 
 type NewsFile = {
   updatedAt: number;
@@ -27,10 +65,27 @@ function ensureHydrated() {
 
   try {
     const raw = JSON.parse(readFileSync(STORE_PATH, "utf8")) as NewsFile;
-    articles = raw.articles ?? [];
-    byTicker = raw.byTicker ?? {};
+    const rawArticles = raw.articles ?? [];
+    articles = repairArticles(rawArticles);
+    byTicker = {};
+    for (const article of articles) {
+      indexArticle(article, byTicker);
+    }
     tickerSearchCursor = raw.tickerSearchCursor ?? 0;
     updatedAt = raw.updatedAt ?? 0;
+
+    if (articles.length !== rawArticles.length) {
+      updatedAt = Date.now();
+      writeFileSync(
+        STORE_PATH,
+        JSON.stringify({
+          updatedAt,
+          articles,
+          byTicker,
+          tickerSearchCursor,
+        } satisfies NewsFile),
+      );
+    }
   } catch {
     articles = [];
     byTicker = {};
@@ -45,6 +100,34 @@ function schedulePersist() {
     persistTimer = null;
     persistNewsStore();
   }, 2000);
+}
+
+function repairStoredArticle(article: StoredNewsArticle): StoredNewsArticle | null {
+  if (article.provider === "markets") {
+    return repairMarketsArticle(article);
+  }
+
+  const hasHtml = /<|&lt;|target=|href=/i.test(`${article.title} ${article.summary} ${article.content}`);
+  if (!hasHtml) return article;
+
+  return {
+    ...article,
+    title: stripHtml(article.title),
+    summary: stripHtml(article.summary),
+    content: stripHtml(article.content) || stripHtml(article.title),
+  };
+}
+
+function repairArticles(raw: StoredNewsArticle[]): StoredNewsArticle[] {
+  const repaired: StoredNewsArticle[] = [];
+  for (const article of raw) {
+    const fixed = repairStoredArticle({
+      ...article,
+      provider: article.provider || "sosovalue",
+    });
+    if (fixed) repaired.push(fixed);
+  }
+  return repaired;
 }
 
 function indexArticle(article: StoredNewsArticle, nextByTicker: Record<string, string[]>) {
@@ -71,6 +154,22 @@ export function getStoredNewsArticles(limit = 500): StoredNewsArticle[] {
   return [...articles]
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, limit);
+}
+
+export function getProviderCounts(): Record<NewsProvider, number> {
+  ensureHydrated();
+  const counts: Record<NewsProvider, number> = {
+    sosovalue: 0,
+    finnhub: 0,
+    cryptopanic: 0,
+    crypto: 0,
+    markets: 0,
+  };
+  for (const article of articles) {
+    const provider = article.provider || "sosovalue";
+    counts[provider]++;
+  }
+  return counts;
 }
 
 export function getStoredNewsArticle(id: string): StoredNewsArticle | null {
@@ -125,9 +224,9 @@ export function upsertNewsArticles(incoming: StoredNewsArticle[]) {
     const existing = byId.get(article.id);
     if (existing) {
       const mergedTickers = [...new Set([...existing.tickers, ...article.tickers])];
-      const candidates = [article.content, existing.content, existing.summary, existing.title, article.summary];
+      const candidates = [article.content, article.summary, existing.content, existing.summary, existing.title, article.title];
       const content = candidates
-        .map((v) => v?.trim() ?? "")
+        .map((v) => stripHtml(v?.trim() ?? ""))
         .filter(Boolean)
         .sort((a, b) => b.length - a.length)[0] ?? "";
       const merged = {
@@ -135,7 +234,9 @@ export function upsertNewsArticles(incoming: StoredNewsArticle[]) {
         ...article,
         tickers: mergedTickers,
         content,
-        summary: article.summary || existing.summary,
+        summary: stripHtml(article.summary || existing.summary),
+        title: stripHtml(article.title || existing.title),
+        provider: article.provider || existing.provider || "sosovalue",
       };
       byId.set(article.id, merged);
       indexArticle(merged, nextByTicker);
@@ -145,10 +246,8 @@ export function upsertNewsArticles(incoming: StoredNewsArticle[]) {
     }
   }
 
-  articles = [...byId.values()]
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, MAX_ARTICLES);
-  byTicker = nextByTicker;
+  articles = trimArticles([...byId.values()]);
+  byTicker = rebuildByTicker(articles);
   updatedAt = Date.now();
   schedulePersist();
 }
