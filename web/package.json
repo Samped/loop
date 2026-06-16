@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "tsx scripts/copy-docs.ts && next dev",
+    "build": "tsx scripts/copy-docs.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "sync-prices": "tsx scripts/sync-prices.ts",

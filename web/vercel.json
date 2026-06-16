@@ -14,9 +14,6 @@
     },
     "src/app/api/perp/positions/[address]/route.ts": {
       "maxDuration": 15
-    },
-    "src/app/api/news/route.ts": {
-      "maxDuration": 25
     }
   }
 }
