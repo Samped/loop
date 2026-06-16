@@ -8,3 +8,5 @@ Loop is a trading interface for SoSoValue indexed crypto stocks on Arc Testnet. 
 Start with [What is Loop?](what-is-loop.md), [Local development](local-development.md), or the [API reference](api-reference.md).
 
 Testnet only. Audit contracts before mainnet use.
+
+Docs also live at [loopfiapp.xyz/docs](https://loopfiapp.xyz/docs).

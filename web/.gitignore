@@ -44,3 +44,6 @@ next-env.d.ts
 
 # local market price cache
 /data/
+
+# copied from repo docs/ at build time
+/content/docs/

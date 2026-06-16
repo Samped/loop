@@ -3,3 +3,7 @@ root: ./
 structure:
   readme: README.md
   summary: SUMMARY.md
+
+redirects:
+  web-application: system-architecture
+  web-application.md: system-architecture.md

@@ -9,6 +9,8 @@ Start with [What is Loop?](what-is-loop.md), [Local development](local-developme
 
 Testnet only. Audit contracts before mainnet use.
 
+Docs also live at [loopfiapp.xyz/docs](https://loopfiapp.xyz/docs).
+
 ---
 
 # What is Loop?
