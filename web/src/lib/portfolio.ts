@@ -1,10 +1,8 @@
 import {
-  createPublicClient,
   formatUnits,
-  http,
   type Address,
 } from "viem";
-import { arcTestnet } from "@/lib/arc-chain";
+import { getArcPublicClient } from "@/lib/arc-public-client";
 import { batchContractReads } from "@/lib/batch-contract-reads";
 import { getVaultReserveStatus, type VaultReserveStatus } from "@/lib/vault-reserve";
 import { getPerpEngineAddress, getStockVaultAddress } from "@/lib/config";
@@ -81,7 +79,7 @@ type PerpPositionRaw = readonly [
 export type KlineGetter = (ticker: string) => Kline[] | undefined;
 
 function getClient() {
-  return createPublicClient({ chain: arcTestnet, transport: http() });
+  return getArcPublicClient();
 }
 
 async function discoverHeldSpotTickers(
