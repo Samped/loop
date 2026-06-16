@@ -8,6 +8,7 @@ import { PriceChart } from "@/components/PriceChart";
 import { StockOverview } from "@/components/StockOverview";
 import { TradePanel } from "@/components/TradePanel";
 import { NewsFeed } from "@/components/NewsFeed";
+import { fetchJson } from "@/lib/fetch-json";
 
 export function StockDetail({ ticker }: { ticker: string }) {
   const upper = ticker.toUpperCase();
@@ -21,18 +22,21 @@ export function StockDetail({ ticker }: { ticker: string }) {
   const [newsLoading, setNewsLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       setLoading(true);
       setChartReady(false);
       try {
         const [stockRes, snapRes, klinesRes] = await Promise.all([
-          fetch(`/api/market/stock/${upper}`).then((r) => r.json()),
-          fetch(`/api/market/snapshot/${upper}`).then((r) => r.json()),
-          fetch(`/api/market/klines/${upper}?limit=180`).then((r) => r.json()),
+          fetchJson<{ stock?: CryptoStock }>(`/api/market/stock/${upper}`),
+          fetchJson<{ snapshot?: MarketSnapshot }>(`/api/market/snapshot/${upper}`),
+          fetchJson<{ klines?: Kline[]; source?: string }>(`/api/market/klines/${upper}?limit=180`),
         ]);
+        if (cancelled) return;
 
         setStock(
-          stockRes.stock ?? {
+          stockRes?.stock ?? {
             ticker: upper,
             name: upper,
             exchange: "",
@@ -41,29 +45,40 @@ export function StockDetail({ ticker }: { ticker: string }) {
             listing_time: "",
           },
         );
-        setSnapshot(snapRes.snapshot ?? null);
+        setSnapshot(snapRes?.snapshot ?? null);
 
-        if (klinesRes.klines?.length) {
+        if (klinesRes?.klines?.length) {
           setKlines(klinesRes.klines);
           setChartReady(true);
           setSource(klinesRes.source ?? "sosovalue");
         }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    load();
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, [upper]);
 
   useEffect(() => {
-    const id = setTimeout(() => {
-      setNewsLoading(true);
-      fetch(`/api/news/stock/${upper}`)
-        .then((r) => r.json())
-        .then((data) => setNews(data.items ?? []))
-        .finally(() => setNewsLoading(false));
-    }, 0);
-    return () => clearTimeout(id);
+    let cancelled = false;
+
+    async function loadNews() {
+      const data = await fetchJson<{ items?: NewsItem[] }>(`/api/news/stock/${upper}`);
+      if (cancelled) return;
+      setNews(data?.items ?? []);
+      setNewsLoading(false);
+    }
+
+    setNewsLoading(true);
+    void loadNews();
+    const interval = setInterval(() => void loadNews(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [upper]);
 
   const stockInfo = stock ?? {
@@ -96,7 +111,12 @@ export function StockDetail({ ticker }: { ticker: string }) {
             <div className="space-y-6 lg:col-span-3">
               {chartReady ? (
                 <div className="glass-card rounded-2xl p-5 sm:p-6">
-                  <PriceChart klines={klines} ticker={upper} />
+                  <PriceChart
+                    klines={klines}
+                    ticker={upper}
+                    latestPrice={snapshot?.mkt_price}
+                    latestTimestamp={snapshot?.timestamp}
+                  />
                   <p className="mt-3 text-[11px] text-zinc-600">
                     Hover chart for OHLCV · Data via {source === "sosovalue" ? "SoSoValue" : source}
                   </p>
