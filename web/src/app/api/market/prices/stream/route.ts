@@ -1,6 +1,7 @@
 import { getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { onStockListed, onStockReady, startSnapshotWarmer } from "@/lib/snapshot-warmer";
 import { getCachedCryptoStocks } from "@/lib/market-data";
+import { withTimeout } from "@/lib/async-timeout";
 import { filterListedSnapshots, isStockListed, isStockReady } from "@/lib/stock-ready";
 
 export const dynamic = "force-dynamic";
@@ -20,12 +21,8 @@ export async function GET(req: Request) {
       void (async () => {
         try {
           let allStocks = getStoredStocks() ?? [];
-          try {
-            const { stocks } = await getCachedCryptoStocks();
-            allStocks = stocks;
-          } catch {
-            // use stored catalog
-          }
+          const refreshed = await withTimeout(getCachedCryptoStocks(), 2_000);
+          if (refreshed) allStocks = refreshed.stocks;
 
           const listedSnapshots = filterListedSnapshots(getStoredSnapshots());
           const listedTickers = allStocks.filter((s) => isStockListed(s.ticker)).map((s) => s.ticker);

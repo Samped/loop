@@ -6,8 +6,15 @@ import { startOracleSyncer } from "@/lib/oracle-syncer";
 import { startNewsSyncer } from "@/lib/news-syncer";
 import { filterListedSnapshots, isStockListed, isStockReady } from "@/lib/stock-ready";
 import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
+import { rateLimit } from "@/lib/api-guard";
+import { withTimeout } from "@/lib/async-timeout";
 
-export async function GET() {
+const LIVE_REFRESH_MS = 2_000;
+
+export async function GET(req: Request) {
+  const limited = rateLimit(req, "api:bootstrap-get", 120, 60_000);
+  if (limited) return limited;
+
   hydrateSnapshotStore();
   startSnapshotWarmer();
   startOracleSyncer();
@@ -18,13 +25,15 @@ export async function GET() {
   let marketSource = allStocks.length === DEMO_STOCKS.length ? "demo" : "sosovalue";
 
   try {
-    const [stocksResult, sectorsResult] = await Promise.all([
-      getCachedCryptoStocks(),
-      getCachedSectors(),
-    ]);
-    allStocks = stocksResult.stocks;
-    sectors = sectorsResult.sectors;
-    marketSource = "sosovalue";
+    const refreshed = await withTimeout(
+      Promise.all([getCachedCryptoStocks(), getCachedSectors()]),
+      LIVE_REFRESH_MS,
+    );
+    if (refreshed) {
+      allStocks = refreshed[0].stocks;
+      sectors = refreshed[1].sectors;
+      marketSource = "sosovalue";
+    }
   } catch {
     if (allStocks === DEMO_STOCKS) marketSource = "demo";
   }
