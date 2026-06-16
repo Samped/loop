@@ -17,6 +17,7 @@ import { ARC_CHAIN_ID, getArcExplorerTxUrl } from "@/lib/arc-chain-utils";
 import { useEnsureArcChain } from "@/hooks/useEnsureArcChain";
 import { useUsdcBalance } from "@/hooks/useUsdcBalance";
 import { invalidateTradeBalances } from "@/lib/invalidate-balances";
+import { BALANCE_REFETCH_MS } from "@/lib/balance-refresh";
 import { formatTradeError } from "@/lib/trade-errors";
 
 function formatSyncAge(timestamp: number): string {
@@ -81,7 +82,12 @@ export function TradePanel({
     abi: stockContractAbi,
     functionName: "getHoldings",
     args: address && ticker ? [address, ticker] : undefined,
-    query: { enabled: Boolean(address && contractAddress && ticker) },
+    query: {
+      enabled: Boolean(address && contractAddress && ticker),
+      staleTime: 0,
+      refetchInterval: BALANCE_REFETCH_MS,
+      refetchOnWindowFocus: true,
+    },
   });
 
   const holdings = (holdingsRaw as bigint | undefined) ?? 0n;
@@ -132,13 +138,16 @@ export function TradePanel({
 
   useEffect(() => {
     if (!isSuccess || !txHash) return;
-    invalidateTradeBalances(queryClient);
-    setConfirmedTxHash(txHash);
-    setStatus(null);
-    setAmount("");
-    setTrading(false);
-    void refetchHoldings();
-    onTradeComplete();
+    const id = setTimeout(() => {
+      invalidateTradeBalances(queryClient);
+      setConfirmedTxHash(txHash);
+      setStatus(null);
+      setAmount("");
+      setTrading(false);
+      void refetchHoldings();
+      onTradeComplete();
+    }, 0);
+    return () => clearTimeout(id);
   }, [isSuccess, txHash, queryClient, onTradeComplete, refetchHoldings]);
 
   const handleSyncPrices = async () => {

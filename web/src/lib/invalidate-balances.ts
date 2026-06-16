@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { refreshAllBalances } from "@/lib/balance-refresh";
 
-/** Refetch wallet USDC and vault holdings after a confirmed trade. */
+/** Refetch wallet USDC, holdings, and portfolio after a confirmed trade. */
 export function invalidateTradeBalances(queryClient: QueryClient) {
-  void queryClient.invalidateQueries({ queryKey: ["readContract"] });
+  refreshAllBalances(queryClient);
 }

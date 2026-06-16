@@ -7,8 +7,12 @@ import {
 import { arcTestnet } from "@/lib/arc-chain";
 import { batchContractReads } from "@/lib/batch-contract-reads";
 import { getVaultReserveStatus, type VaultReserveStatus } from "@/lib/vault-reserve";
-import { getStockVaultAddress } from "@/lib/config";
+import { getPerpEngineAddress, getStockVaultAddress } from "@/lib/config";
+import { perpEngineAbi } from "@/lib/contracts/perp-engine";
 import { stockVaultAbi } from "@/lib/contracts/stock-vault";
+import { parsePerpSide, type PerpSide } from "@/lib/perp";
+import { readPerpMarkSnapshot } from "@/lib/perp-mark-engine";
+import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
 import { getContractPrices } from "@/lib/contract-prices";
 import { contractPriceToSnapshot } from "@/lib/snapshot-utils";
 import { ARC_USDC_ADDRESS, erc20Abi } from "@/lib/usdc";
@@ -16,6 +20,9 @@ import type { CryptoStock, Kline, MarketSnapshot } from "@/lib/sosovalue";
 
 const READ_BATCH = 25;
 const SHARE_DECIMALS = 18;
+const SPOT_DISCOVERY_TTL_MS = 5 * 60_000;
+
+const spotDiscoveryCache = new Map<string, { at: number; tickers: string[] }>();
 
 export type PortfolioPosition = {
   ticker: string;
@@ -28,6 +35,18 @@ export type PortfolioPosition = {
   dayPnl: number;
   periodChangePct: number;
   sparkline: number[];
+};
+
+export type PortfolioPerpPosition = {
+  ticker: string;
+  name: string;
+  side: Exclude<PerpSide, "none">;
+  size: number;
+  margin: number;
+  entryPrice: number;
+  markPrice: number;
+  unrealizedPnl: number;
+  equity: number;
 };
 
 export type PortfolioHistoryPoint = {
@@ -44,14 +63,53 @@ export type PortfolioData = {
   periodPnl: number;
   periodPnlPct: number;
   positions: PortfolioPosition[];
+  perpPositions: PortfolioPerpPosition[];
   history: PortfolioHistoryPoint[];
   reserve: VaultReserveStatus;
 };
+
+type PerpPositionRaw = readonly [
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+];
 
 export type KlineGetter = (ticker: string) => Kline[] | undefined;
 
 function getClient() {
   return createPublicClient({ chain: arcTestnet, transport: http() });
+}
+
+async function discoverHeldSpotTickers(
+  address: Address,
+  stocks: CryptoStock[],
+  snapshots: Record<string, MarketSnapshot>,
+  vault = getStockVaultAddress(),
+): Promise<string[]> {
+  if (!vault) return [];
+
+  const cacheKey = address.toLowerCase();
+  const cached = spotDiscoveryCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SPOT_DISCOVERY_TTL_MS) {
+    return cached.tickers;
+  }
+
+  const candidates = stocks
+    .map((s) => s.ticker)
+    .filter((ticker) => (snapshots[ticker]?.mkt_price ?? 0) > 0);
+
+  let held: string[] = [];
+  if (candidates.length > 0) {
+    const holdings = await fetchHoldingsForUser(address, candidates, vault);
+    held = Object.keys(holdings);
+  }
+
+  spotDiscoveryCache.set(cacheKey, { at: Date.now(), tickers: held });
+  return held;
 }
 
 export async function fetchHoldingsForUser(
@@ -83,6 +141,76 @@ export async function fetchHoldingsForUser(
   }
 
   return holdings;
+}
+
+async function fetchPerpPositionsForUser(
+  address: Address,
+  tickers: string[],
+  contract = getPerpEngineAddress(),
+): Promise<Record<string, PerpPositionRaw>> {
+  if (!contract || tickers.length === 0) return {};
+
+  const client = getClient();
+  const positions: Record<string, PerpPositionRaw> = {};
+
+  for (let i = 0; i < tickers.length; i += READ_BATCH) {
+    const batch = tickers.slice(i, i + READ_BATCH);
+    const items = batch.map((ticker) => ({
+      address: contract,
+      abi: perpEngineAbi,
+      functionName: "getPosition" as const,
+      args: [address, ticker] as const,
+    }));
+
+    const results = await batchContractReads<PerpPositionRaw>(client, items, READ_BATCH);
+    for (let j = 0; j < batch.length; j++) {
+      const result = results[j];
+      if (result.status === "success" && Number(result.result[0]) !== 0) {
+        positions[batch[j]] = result.result;
+      }
+    }
+  }
+
+  return positions;
+}
+
+export function buildPerpPositions(
+  perpRaw: Record<string, PerpPositionRaw>,
+  stocks: CryptoStock[],
+  snapshots: Record<string, MarketSnapshot>,
+  liveMarks: Record<string, number> = {},
+): PortfolioPerpPosition[] {
+  const stockMap = new Map(stocks.map((s) => [s.ticker, s]));
+  const positions: PortfolioPerpPosition[] = [];
+
+  for (const [ticker, raw] of Object.entries(perpRaw)) {
+    const side = parsePerpSide(Number(raw[0]));
+    if (side === "none") continue;
+
+    const size = Number(formatUnits(raw[1], SHARE_DECIMALS));
+    const entryPrice = Number(raw[3]) / 1e6;
+    const margin = Number(raw[2]) / 1e6;
+    const markPrice = liveMarks[ticker] ?? snapshots[ticker]?.mkt_price ?? entryPrice;
+    const onChainPnl = Number(raw[4]) / 1e6;
+    const computedPnl =
+      side === "long" ? (markPrice - entryPrice) * size : (entryPrice - markPrice) * size;
+    const unrealizedPnl = liveMarks[ticker] != null ? computedPnl : onChainPnl;
+
+    positions.push({
+      ticker,
+      name: stockMap.get(ticker)?.name ?? ticker,
+      side,
+      size,
+      margin,
+      entryPrice,
+      markPrice,
+      unrealizedPnl,
+      equity: margin + unrealizedPnl,
+    });
+  }
+
+  positions.sort((a, b) => b.equity - a.equity);
+  return positions;
 }
 
 async function enrichSnapshotsForHoldings(
@@ -164,6 +292,8 @@ export function buildPortfolioData({
   klinesByTicker,
   usdcBalance,
   reserve,
+  perpRaw = {},
+  livePerpMarks = {},
 }: {
   address: string;
   stocks: CryptoStock[];
@@ -172,6 +302,8 @@ export function buildPortfolioData({
   klinesByTicker: Record<string, Kline[]>;
   usdcBalance: bigint;
   reserve: VaultReserveStatus;
+  perpRaw?: Record<string, PerpPositionRaw>;
+  livePerpMarks?: Record<string, number>;
 }): PortfolioData {
   const stockMap = new Map(stocks.map((s) => [s.ticker, s]));
   const positions: PortfolioPosition[] = [];
@@ -232,9 +364,24 @@ export function buildPortfolioData({
     periodPnl,
     periodPnlPct,
     positions,
+    perpPositions: buildPerpPositions(perpRaw, stocks, snapshots, livePerpMarks),
     history,
     reserve,
   };
+}
+
+export async function getPerpPositionsForAddress(
+  address: Address,
+  stocks: CryptoStock[],
+  snapshots: Record<string, MarketSnapshot> = {},
+): Promise<PortfolioPerpPosition[]> {
+  const perpRaw = await fetchPerpPositionsForUser(address, [...PERP_MARKET_TICKERS]);
+  const livePerpMarks: Record<string, number> = {};
+  for (const ticker of Object.keys(perpRaw)) {
+    const snap = readPerpMarkSnapshot(ticker);
+    if (snap) livePerpMarks[ticker] = snap.price;
+  }
+  return buildPerpPositions(perpRaw, stocks, snapshots, livePerpMarks);
 }
 
 export async function getPortfolioForAddress(
@@ -244,11 +391,12 @@ export async function getPortfolioForAddress(
   getKlines: KlineGetter,
 ): Promise<PortfolioData> {
   const client = getClient();
-  const tickersToScan = stocks.map((s) => s.ticker);
   const stockMap = new Map(stocks.map((s) => [s.ticker, s]));
+  const perpTickers = [...PERP_MARKET_TICKERS];
 
-  const [holdingsRaw, usdcBalance, reserve] = await Promise.all([
-    fetchHoldingsForUser(address, tickersToScan),
+  const [heldSpotTickers, perpRaw, usdcBalance, reserve] = await Promise.all([
+    discoverHeldSpotTickers(address, stocks, snapshots),
+    fetchPerpPositionsForUser(address, perpTickers),
     client.readContract({
       address: ARC_USDC_ADDRESS,
       abi: erc20Abi,
@@ -258,8 +406,20 @@ export async function getPortfolioForAddress(
     getVaultReserveStatus(),
   ]);
 
+  const holdingsRaw =
+    heldSpotTickers.length > 0
+      ? await fetchHoldingsForUser(address, heldSpotTickers)
+      : {};
+
   const enrichedSnapshots = await enrichSnapshotsForHoldings(holdingsRaw, snapshots);
-  const heldTickers = Object.keys(holdingsRaw);
+
+  const livePerpMarks: Record<string, number> = {};
+  for (const ticker of Object.keys(perpRaw)) {
+    const snap = readPerpMarkSnapshot(ticker);
+    if (snap) livePerpMarks[ticker] = snap.price;
+  }
+
+  const heldTickers = [...new Set([...Object.keys(holdingsRaw), ...Object.keys(perpRaw)])];
   const catalog = heldTickers.map(
     (t) => stockMap.get(t) ?? { ticker: t, name: t, exchange: "", sector: "", introduction: "", listing_time: "" },
   );
@@ -278,5 +438,7 @@ export async function getPortfolioForAddress(
     klinesByTicker,
     usdcBalance,
     reserve,
+    perpRaw,
+    livePerpMarks,
   });
 }

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import type { PortfolioData, PortfolioPosition } from "@/lib/portfolio";
+import type { PortfolioData, PortfolioPerpPosition, PortfolioPosition } from "@/lib/portfolio";
+import { BALANCE_REFETCH_MS, PORTFOLIO_REFRESH_EVENT } from "@/lib/balance-refresh";
 import { PortfolioChart } from "@/components/PortfolioChart";
 import { useMounted } from "@/hooks/useMounted";
 
@@ -124,6 +125,54 @@ function PositionCard({ p }: { p: PortfolioPosition }) {
   );
 }
 
+function PerpPositionCard({ p }: { p: PortfolioPerpPosition }) {
+  const isLong = p.side === "long";
+  return (
+    <Link
+      href={`/perp/${p.ticker}`}
+      className="glass-card-hover block rounded-xl p-4 transition-all"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-10 w-10 items-center justify-center rounded-lg text-sm font-bold ${
+              isLong ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+            }`}
+          >
+            {p.ticker.slice(0, 2)}
+          </div>
+          <div>
+            <p className="font-semibold text-zinc-100">
+              {p.ticker}{" "}
+              <span className={`text-xs uppercase ${isLong ? "text-emerald-400" : "text-rose-400"}`}>
+                {p.side}
+              </span>
+            </p>
+            <p className="text-xs text-zinc-500">{p.name}</p>
+          </div>
+        </div>
+        <p className="font-mono text-sm font-medium text-zinc-100">${p.equity.toFixed(2)}</p>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">Margin</p>
+          <p className="font-mono text-zinc-300">${p.margin.toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">P&L</p>
+          <p className={`font-mono ${p.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            {p.unrealizedPnl >= 0 ? "+" : ""}${p.unrealizedPnl.toFixed(2)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">Entry</p>
+          <p className="font-mono text-zinc-300">${p.entryPrice.toFixed(2)}</p>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) {
   const mounted = useMounted();
   const { address, isConnected } = useAccount();
@@ -155,15 +204,21 @@ export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) 
   }, [address]);
 
   useEffect(() => {
-    load();
+    const id = setTimeout(() => void load(), 0);
+    return () => clearTimeout(id);
   }, [load, refreshKey]);
 
   useEffect(() => {
     if (!address) return;
     const interval = setInterval(() => {
       void load({ silent: true });
-    }, 30_000);
-    return () => clearInterval(interval);
+    }, BALANCE_REFETCH_MS);
+    const onRefresh = () => void load({ silent: true });
+    window.addEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh);
+    };
   }, [address, load]);
 
   const copyAddress = async () => {
@@ -252,7 +307,7 @@ export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) 
             <StatBox
               label="Cash (USDC)"
               value={`$${portfolio.usdcBalance.toFixed(2)}`}
-              sub="Available on Arc"
+              sub="Available on Arc · live"
             />
             <StatBox
               label="Positions"
@@ -303,6 +358,17 @@ export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) 
           <Link href="/" className="mt-3 inline-block text-sm font-medium text-emerald-400 hover:text-emerald-300">
             Go to Markets to buy →
           </Link>
+        </div>
+      )}
+
+      {portfolio && (portfolio.perpPositions?.length ?? 0) > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Perp Positions · Arc Testnet
+          </h3>
+          {portfolio.perpPositions.map((p) => (
+            <PerpPositionCard key={p.ticker} p={p} />
+          ))}
         </div>
       )}
     </section>

@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { getCachedCryptoStocks } from "@/lib/market-data";
-import { getContractPrices } from "@/lib/contract-prices";
-import { getPortfolioForAddress } from "@/lib/portfolio";
-import { mergePriceSources } from "@/lib/snapshot-utils";
+import { getCachedPortfolioForAddress } from "@/lib/portfolio-cache";
 import {
   getStoredKlines,
   getStoredSnapshots,
@@ -34,20 +32,10 @@ export async function GET(_req: Request, { params }: Params) {
     }
   }
 
-  const tickers = stocks.map((s) => s.ticker);
-  const stored = getStoredSnapshots();
-
-  let contractPrices: Record<string, bigint> = {};
-  try {
-    contractPrices = await getContractPrices(tickers);
-  } catch {
-    contractPrices = {};
-  }
-
-  const snapshots = mergePriceSources(tickers, stored, contractPrices);
+  const snapshots = getStoredSnapshots() ?? {};
 
   try {
-    const portfolio = await getPortfolioForAddress(
+    const portfolio = await getCachedPortfolioForAddress(
       raw as `0x${string}`,
       stocks,
       snapshots,
