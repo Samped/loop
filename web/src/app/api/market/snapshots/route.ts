@@ -1,62 +1,30 @@
 import { NextResponse } from "next/server";
-import { getCachedCryptoStocks } from "@/lib/market-data";
-import {
-  hasLiveMarketApi,
-  isSnapshotPrefetchActive,
-  isVercelServerless,
-  seedDemoSnapshots,
-  startBackgroundSnapshotPrefetch,
-} from "@/lib/market-cold-start";
-import { getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
-import { mergePriceSources } from "@/lib/snapshot-utils";
-import { withTimeout } from "@/lib/async-timeout";
+import { buildMarketPayloadFromStore, hasLiveMarketApi, seedDemoSnapshots } from "@/lib/market-cold-start";
+import { getStoredSnapshots, hydrateSnapshotStore } from "@/lib/snapshot-store";
+import { filterListedSnapshots } from "@/lib/stock-ready";
 import { DEMO_STOCKS } from "@/lib/sosovalue";
 
-export const maxDuration = 25;
+export const maxDuration = 10;
 
 export async function GET() {
   try {
     hydrateSnapshotStore();
-
-    let stocks = getStoredStocks() ?? [];
-    try {
-      const refreshed = await withTimeout(getCachedCryptoStocks(), 4_000);
-      if (refreshed?.stocks?.length) stocks = refreshed.stocks;
-    } catch {
-      // use stored
-    }
-
-    if (stocks.length === 0) {
-      stocks = hasLiveMarketApi() ? [] : DEMO_STOCKS;
-    }
-
-    if (!hasLiveMarketApi()) {
-      seedDemoSnapshots(stocks);
-    } else if (stocks.length > 0) {
-      startBackgroundSnapshotPrefetch(stocks, { demo: false });
-    }
-
-    const tickers = stocks.map((s) => s.ticker);
-    const cached = getStoredSnapshots();
-    const snapshots = mergePriceSources(tickers, cached, {});
-    const count = Object.keys(snapshots).length;
-    const refreshing = hasLiveMarketApi() && stocks.length > 0 && count < stocks.length;
+    const { allStocks, snapshots } = buildMarketPayloadFromStore();
+    const tickers = allStocks.length ? allStocks.map((s) => s.ticker) : DEMO_STOCKS.map((s) => s.ticker);
+    const merged = filterListedSnapshots(snapshots);
+    const count = Object.keys(merged).length;
 
     return NextResponse.json({
-      snapshots,
+      snapshots: merged,
       count,
       total: tickers.length,
-      refreshing,
-      source: hasLiveMarketApi() ? "live" : "demo",
+      refreshing: false,
+      source: hasLiveMarketApi() ? "live" : "cache",
     });
   } catch (err) {
     console.error("[snapshots]", err);
     seedDemoSnapshots(DEMO_STOCKS);
-    const snapshots = mergePriceSources(
-      DEMO_STOCKS.map((s) => s.ticker),
-      getStoredSnapshots(),
-      {},
-    );
+    const snapshots = filterListedSnapshots(getStoredSnapshots());
     return NextResponse.json({
       snapshots,
       count: Object.keys(snapshots).length,

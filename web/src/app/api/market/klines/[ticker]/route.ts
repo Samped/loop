@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStoredKlines, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { getCachedKlines } from "@/lib/market-data";
-import { isStockReady } from "@/lib/stock-ready";
 import { normalizeKline } from "@/lib/sosovalue";
 
 type Params = { params: Promise<{ ticker: string }> };
@@ -14,15 +13,11 @@ export async function GET(req: Request, { params }: Params) {
 
   hydrateSnapshotStore();
 
-  if (!isStockReady(upper)) {
-    return NextResponse.json({ error: "Chart not ready — stock still syncing" }, { status: 404 });
-  }
-
   const stored = getStoredKlines(upper);
-  if (stored) {
+  if (stored?.length) {
     return NextResponse.json({
       klines: stored.slice(-limit).map(normalizeKline),
-      source: "sosovalue",
+      source: "cache",
     });
   }
 

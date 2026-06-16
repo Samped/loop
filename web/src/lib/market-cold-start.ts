@@ -1,41 +1,41 @@
 import "server-only";
 
+import {
+  getStoredSectors,
+  getStoredSnapshots,
+  getStoredStocks,
+  hasBundledMarketCatalog,
+  setStoredSectors,
+  setStoredStocks,
+} from "@/lib/snapshot-store";
 import { bulkSetStoredSnapshots } from "@/lib/snapshot-store";
 import { isStockListed } from "@/lib/stock-ready";
 import { withTimeout } from "@/lib/async-timeout";
 import {
   DEMO_SNAPSHOTS,
+  getCryptoStocks,
   getMarketSnapshotsParallel,
+  getSectors,
   type CryptoStock,
 } from "@/lib/sosovalue";
 
 export const isVercelServerless = Boolean(process.env.VERCEL);
 
 const PARALLEL_CHUNK = 25;
-const LIVE_PREFETCH_TIMEOUT_MS = 12_000;
-const VERCEL_PREFETCH_TIMEOUT_MS = 20_000;
+const LIVE_PREFETCH_TIMEOUT_MS = 20_000;
+const BUNDLE_STALE_MS = 30 * 60 * 1000;
 
 let prefetchInFlight = false;
+let refreshInFlight = false;
 
 function countListed(stocks: CryptoStock[]): number {
   return stocks.filter((s) => isStockListed(s.ticker)).length;
 }
 
-function needsSnapshotPrefetch(stocks: CryptoStock[], options?: { demo?: boolean }): boolean {
-  if (options?.demo || !process.env.SOSOVALUE_API_KEY) {
-    return countListed(stocks) === 0;
-  }
-  const listed = countListed(stocks);
-  if (listed === 0) return true;
-  if (stocks.length <= 6) return true;
-  return listed < 40 || listed < stocks.length * 0.35;
+export function hasLiveMarketApi(): boolean {
+  return Boolean(process.env.SOSOVALUE_API_KEY);
 }
 
-export function isSnapshotPrefetchActive(): boolean {
-  return prefetchInFlight;
-}
-
-/** Instant demo prices when SoSoValue is unavailable. */
 export function seedDemoSnapshots(stocks: CryptoStock[]) {
   const batch: Record<string, import("@/lib/sosovalue").MarketSnapshot> = {};
   for (const stock of stocks) {
@@ -45,48 +45,75 @@ export function seedDemoSnapshots(stocks: CryptoStock[]) {
   if (Object.keys(batch).length > 0) bulkSetStoredSnapshots(batch);
 }
 
-/** Load prices for the full catalog in parallel (serverless cold start). */
 export async function ensureInitialSnapshots(
   stocks: CryptoStock[],
   options?: { demo?: boolean },
 ): Promise<number> {
-  if (!needsSnapshotPrefetch(stocks, options)) return countListed(stocks);
-
   if (options?.demo || !process.env.SOSOVALUE_API_KEY) {
-    seedDemoSnapshots(stocks);
+    if (countListed(stocks) === 0) seedDemoSnapshots(stocks);
     return countListed(stocks);
   }
 
   const tickers = stocks.map((s) => s.ticker);
-  const timeoutMs = isVercelServerless ? VERCEL_PREFETCH_TIMEOUT_MS : LIVE_PREFETCH_TIMEOUT_MS;
   const fetched = await withTimeout(
     getMarketSnapshotsParallel(tickers, PARALLEL_CHUNK),
-    timeoutMs,
+    LIVE_PREFETCH_TIMEOUT_MS,
   );
 
   if (fetched && Object.keys(fetched).length > 0) {
     bulkSetStoredSnapshots(fetched);
   }
 
-  if (countListed(stocks) === 0 && (options?.demo || !process.env.SOSOVALUE_API_KEY)) {
-    seedDemoSnapshots(stocks.slice(0, 4));
-  }
-
   return countListed(stocks);
 }
 
-/** Non-blocking prefetch for Vercel bootstrap. */
 export function startBackgroundSnapshotPrefetch(
   stocks: CryptoStock[],
   options?: { demo?: boolean },
 ) {
-  if (prefetchInFlight || !needsSnapshotPrefetch(stocks, options)) return;
+  if (prefetchInFlight || options?.demo || !process.env.SOSOVALUE_API_KEY) return;
   prefetchInFlight = true;
   void ensureInitialSnapshots(stocks, options).finally(() => {
     prefetchInFlight = false;
   });
 }
 
-export function hasLiveMarketApi(): boolean {
-  return Boolean(process.env.SOSOVALUE_API_KEY);
+export function isSnapshotPrefetchActive(): boolean {
+  return prefetchInFlight;
+}
+
+/** Refresh catalog and prices in the background when cache is stale. */
+export function startBackgroundMarketRefresh(cacheAgeMs: number) {
+  if (refreshInFlight || !hasLiveMarketApi()) return;
+  if (cacheAgeMs < BUNDLE_STALE_MS) return;
+
+  refreshInFlight = true;
+  void (async () => {
+    try {
+      const refreshed = await withTimeout(Promise.all([getCryptoStocks(), getSectors()]), 8_000);
+      if (refreshed) {
+        const [liveStocks, liveSectors] = refreshed;
+        if (liveStocks.length) setStoredStocks(liveStocks);
+        if (liveSectors.length) setStoredSectors(liveSectors);
+        startBackgroundSnapshotPrefetch(liveStocks, { demo: false });
+      }
+    } finally {
+      refreshInFlight = false;
+    }
+  })();
+}
+
+export function buildMarketPayloadFromStore() {
+  const allStocks = getStoredStocks() ?? [];
+  const sectors = getStoredSectors() ?? [];
+  const snapshots = getStoredSnapshots();
+  const listedStocks = allStocks.filter((s) => isStockListed(s.ticker));
+
+  return {
+    allStocks,
+    sectors,
+    snapshots,
+    listedStocks,
+    marketSource: hasBundledMarketCatalog() || hasLiveMarketApi() ? "sosovalue" : "demo",
+  };
 }

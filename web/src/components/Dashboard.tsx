@@ -2,17 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CryptoStock, MarketSnapshot, Sector } from "@/lib/sosovalue";
-import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
 import { SectorCards } from "@/components/SectorCards";
 import { StockList } from "@/components/StockList";
 import { DashboardStatCard, PerpPromoCard } from "@/components/PerpPromoCard";
 import { DashboardPerpPositions } from "@/components/DashboardPerpPositions";
 
-const MAX_POLL_ROUNDS = 20;
-
 export function Dashboard() {
   const [catalog, setCatalog] = useState<CryptoStock[]>([]);
-  const [listedTickers, setListedTickers] = useState<Set<string>>(new Set());
   const [chartReady, setChartReady] = useState<Set<string>>(new Set());
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [snapshots, setSnapshots] = useState<Record<string, MarketSnapshot>>({});
@@ -21,26 +17,21 @@ export function Dashboard() {
   const [loadError, setLoadError] = useState(false);
   const [priceTotal, setPriceTotal] = useState(0);
   const [pricesRefreshing, setPricesRefreshing] = useState(false);
-  const [pollRounds, setPollRounds] = useState(0);
 
   const loadMarketData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
-    setPollRounds(0);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
       const res = await fetch("/api/market/bootstrap", { signal: controller.signal });
       if (!res.ok) throw new Error(`bootstrap ${res.status}`);
       const bootstrapRes = await res.json();
 
       const allStocks: CryptoStock[] = bootstrapRes.allStocks ?? bootstrapRes.stocks ?? [];
-      const initialListed: CryptoStock[] = bootstrapRes.stocks ?? [];
-
       if (allStocks.length === 0) throw new Error("empty catalog");
 
       setCatalog(allStocks);
-      setListedTickers(new Set(initialListed.map((s) => s.ticker)));
       setChartReady(new Set((bootstrapRes.chartReady as string[] | undefined) ?? []));
       setSectors(bootstrapRes.sectors ?? []);
       setMarketSource(bootstrapRes.marketSource ?? "demo");
@@ -48,12 +39,6 @@ export function Dashboard() {
       setPriceTotal(bootstrapRes.priceTotal ?? allStocks.length);
       setPricesRefreshing(bootstrapRes.pricesRefreshing === true);
     } catch {
-      setCatalog(DEMO_STOCKS);
-      setListedTickers(new Set(DEMO_STOCKS.map((s) => s.ticker)));
-      setSectors(DEMO_SECTORS);
-      setMarketSource("demo");
-      setPriceTotal(DEMO_STOCKS.length);
-      setPricesRefreshing(false);
       setLoadError(true);
     } finally {
       clearTimeout(timeout);
@@ -67,7 +52,7 @@ export function Dashboard() {
   }, [loadMarketData]);
 
   useEffect(() => {
-    if (loading || !pricesRefreshing || pollRounds >= MAX_POLL_ROUNDS) return;
+    if (loading || !pricesRefreshing) return;
 
     const poll = async () => {
       try {
@@ -78,32 +63,18 @@ export function Dashboard() {
           total?: number;
           refreshing?: boolean;
         };
-        if (data.snapshots) {
-          setSnapshots(data.snapshots);
-          const withPrice = Object.entries(data.snapshots)
-            .filter(([, snap]) => snap.mkt_price > 0 && snap.total_marketcap > 0)
-            .map(([ticker]) => ticker);
-          setListedTickers(new Set(withPrice));
-        }
+        if (data.snapshots) setSnapshots(data.snapshots);
         if (data.total != null) setPriceTotal(data.total);
         setPricesRefreshing(data.refreshing === true);
       } catch {
-        // stop after max rounds
-      } finally {
-        setPollRounds((n) => n + 1);
+        setPricesRefreshing(false);
       }
     };
 
-    const id = setInterval(() => void poll(), 3_000);
+    const id = setInterval(() => void poll(), 4_000);
     void poll();
     return () => clearInterval(id);
-  }, [loading, pricesRefreshing, pollRounds]);
-
-  useEffect(() => {
-    if (pollRounds >= MAX_POLL_ROUNDS && pricesRefreshing) {
-      setPricesRefreshing(false);
-    }
-  }, [pollRounds, pricesRefreshing]);
+  }, [loading, pricesRefreshing]);
 
   const pricedCount = useMemo(
     () =>
@@ -120,8 +91,8 @@ export function Dashboard() {
       : chartReady.size > 0
         ? `${chartReady.size} charts ready`
         : loadError
-          ? "Showing demo markets"
-          : "Charts syncing";
+          ? "Could not refresh live feed"
+          : `${pricedCount} prices live`;
 
   const syncProgress =
     pricesRefreshing && pricedCount < priceTotal
@@ -134,6 +105,17 @@ export function Dashboard() {
         <div className="flex flex-col items-center justify-center py-32">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
           <p className="mt-4 text-sm text-zinc-500">Loading markets…</p>
+        </div>
+      ) : loadError && catalog.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-32">
+          <p className="text-sm text-zinc-500">Could not load markets.</p>
+          <button
+            type="button"
+            onClick={() => void loadMarketData()}
+            className="mt-4 rounded-lg border border-white/[0.1] bg-white/[0.04] px-4 py-2 text-sm text-zinc-300 hover:bg-white/[0.08]"
+          >
+            Retry
+          </button>
         </div>
       ) : (
         <div className="space-y-8">

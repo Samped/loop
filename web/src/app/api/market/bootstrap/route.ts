@@ -1,45 +1,35 @@
 import { NextResponse } from "next/server";
-import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import {
+  buildMarketPayloadFromStore,
   hasLiveMarketApi,
   isSnapshotPrefetchActive,
-  isVercelServerless,
   seedDemoSnapshots,
+  startBackgroundMarketRefresh,
   startBackgroundSnapshotPrefetch,
 } from "@/lib/market-cold-start";
+import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import {
-  getStoredSectors,
+  getMarketCacheAgeMs,
   getStoredSnapshots,
   getStoredStocks,
+  hasBundledMarketCatalog,
   hydrateSnapshotStore,
   setStoredSectors,
   setStoredStocks,
 } from "@/lib/snapshot-store";
-import { filterListedSnapshots, isStockListed, isStockReady } from "@/lib/stock-ready";
-import { DEMO_SECTORS, DEMO_STOCKS, getCryptoStocks, getSectors, type CryptoStock, type Sector } from "@/lib/sosovalue";
+import { filterListedSnapshots, isStockReady } from "@/lib/stock-ready";
+import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
 import { rateLimit } from "@/lib/api-guard";
 import { withTimeout } from "@/lib/async-timeout";
 
-const CATALOG_TIMEOUT_MS = 6_000;
+export const maxDuration = 10;
 
-export const maxDuration = 25;
-
-function demoBootstrap() {
-  seedDemoSnapshots(DEMO_STOCKS);
-  const snapshots = filterListedSnapshots(getStoredSnapshots());
-  const listed = DEMO_STOCKS.filter((s) => isStockListed(s.ticker));
-  return NextResponse.json({
-    stocks: listed,
-    allStocks: DEMO_STOCKS,
-    sectors: DEMO_SECTORS,
-    snapshots,
-    chartReady: [],
-    marketSource: "demo",
-    priceCount: listed.length,
-    chartCount: 0,
-    priceTotal: DEMO_STOCKS.length,
-    pricesRefreshing: false,
-  });
+function jsonBootstrap(body: Record<string, unknown>, cacheSeconds = 0) {
+  const headers: Record<string, string> = {};
+  if (cacheSeconds > 0) {
+    headers["Cache-Control"] = `public, s-maxage=${cacheSeconds}, stale-while-revalidate=120`;
+  }
+  return NextResponse.json(body, { headers });
 }
 
 export async function GET(req: Request) {
@@ -49,64 +39,85 @@ export async function GET(req: Request) {
   try {
     hydrateSnapshotStore();
 
-    let allStocks: CryptoStock[] = getStoredStocks() ?? [];
-    let sectors: Sector[] = getStoredSectors() ?? [];
-    let marketSource = hasLiveMarketApi() ? "sosovalue" : "demo";
+    if (hasBundledMarketCatalog()) {
+      const cacheAgeMs = getMarketCacheAgeMs();
+      if (hasLiveMarketApi()) startBackgroundMarketRefresh(cacheAgeMs);
+
+      const { allStocks, sectors, snapshots, listedStocks, marketSource } =
+        buildMarketPayloadFromStore();
+      const chartReady = allStocks.filter((s) => isStockReady(s.ticker)).map((s) => s.ticker);
+
+      return jsonBootstrap(
+        {
+          stocks: listedStocks,
+          allStocks,
+          sectors,
+          snapshots: filterListedSnapshots(snapshots),
+          chartReady,
+          marketSource,
+          priceCount: listedStocks.length,
+          chartCount: chartReady.length,
+          priceTotal: allStocks.length,
+          pricesRefreshing: isSnapshotPrefetchActive(),
+        },
+        60,
+      );
+    }
+
+    let allStocks = getStoredStocks() ?? [];
+    let sectors = getStoredSectors() ?? [];
 
     const refreshed = await withTimeout(
       Promise.all([getCachedCryptoStocks(), getCachedSectors()]),
-      CATALOG_TIMEOUT_MS,
+      5_000,
     );
     if (refreshed) {
       if (Array.isArray(refreshed[0]?.stocks)) allStocks = refreshed[0].stocks;
       if (Array.isArray(refreshed[1]?.sectors)) sectors = refreshed[1].sectors;
     }
 
-    if (hasLiveMarketApi() && allStocks.length <= DEMO_STOCKS.length) {
-      const direct = await withTimeout(Promise.all([getCryptoStocks(), getSectors()]), 5_000);
-      if (direct) {
-        const [liveStocks, liveSectors] = direct;
-        if (Array.isArray(liveStocks) && liveStocks.length > allStocks.length) {
-          allStocks = liveStocks;
-          setStoredStocks(liveStocks);
-        }
-        if (Array.isArray(liveSectors) && liveSectors.length > 0) {
-          sectors = liveSectors;
-          setStoredSectors(liveSectors);
-        }
-      }
-    }
-
     if (allStocks.length === 0) {
-      return demoBootstrap();
-    }
-
-    if (!hasLiveMarketApi()) {
+      allStocks = DEMO_STOCKS;
+      sectors = DEMO_SECTORS;
       seedDemoSnapshots(allStocks);
-      marketSource = "demo";
-    } else {
+    } else if (hasLiveMarketApi()) {
       startBackgroundSnapshotPrefetch(allStocks, { demo: false });
+    } else {
+      seedDemoSnapshots(allStocks);
     }
 
-    const snapshots = filterListedSnapshots(getStoredSnapshots());
-    const listedStocks = allStocks.filter((s) => isStockListed(s.ticker));
-    const chartReady = allStocks.filter((s) => isStockReady(s.ticker)).map((s) => s.ticker);
-    const pricesRefreshing = hasLiveMarketApi() && listedStocks.length < allStocks.length;
+    if (refreshed?.[0]?.stocks) setStoredStocks(allStocks);
+    if (refreshed?.[1]?.sectors) setStoredSectors(sectors);
 
-    return NextResponse.json({
-      stocks: listedStocks,
+    const { listedStocks, snapshots, marketSource } = buildMarketPayloadFromStore();
+    const chartReady = allStocks.filter((s) => isStockReady(s.ticker)).map((s) => s.ticker);
+
+    return jsonBootstrap({
+      stocks: listedStocks.length ? listedStocks : allStocks,
       allStocks,
       sectors,
-      snapshots,
+      snapshots: filterListedSnapshots(snapshots),
       chartReady,
-      marketSource,
+      marketSource: allStocks === DEMO_STOCKS ? "demo" : marketSource,
       priceCount: listedStocks.length,
       chartCount: chartReady.length,
       priceTotal: allStocks.length,
-      pricesRefreshing,
+      pricesRefreshing: hasLiveMarketApi() && listedStocks.length < allStocks.length,
     });
   } catch (err) {
     console.error("[bootstrap]", err);
-    return demoBootstrap();
+    seedDemoSnapshots(DEMO_STOCKS);
+    return jsonBootstrap({
+      stocks: DEMO_STOCKS,
+      allStocks: DEMO_STOCKS,
+      sectors: DEMO_SECTORS,
+      snapshots: filterListedSnapshots(getStoredSnapshots()),
+      chartReady: [],
+      marketSource: "demo",
+      priceCount: DEMO_STOCKS.length,
+      chartCount: 0,
+      priceTotal: DEMO_STOCKS.length,
+      pricesRefreshing: false,
+    });
   }
 }

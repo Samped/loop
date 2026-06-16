@@ -46,6 +46,11 @@ async function main() {
     if (total >= stocks.length) break;
   }
   console.log(`Done — ${total} stocks with price + chart saved to data/market.json`);
+
+  const { copyFileSync } = await import("fs");
+  const { resolve } = await import("path");
+  copyFileSync(resolve(__dirname, "../data/market.json"), resolve(__dirname, "../public/market-cache.json"));
+  console.log("Updated public/market-cache.json for production deploy");
 }
 
 main().catch((err) => {
