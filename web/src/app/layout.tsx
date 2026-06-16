@@ -14,12 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Loop — Stock Trading on Arc Testnet",
-  description: "Trade crypto stocks with SoSoValue market data and on-chain settlement on Arc Testnet",
-  icons: {
-    icon: "/loop.png",
-    apple: "/loop.png",
+  title: {
+    default: "Loop",
+    template: "%s · Loop",
   },
+  description: "Trade crypto stocks with SoSoValue market data and on-chain settlement on Arc Testnet",
+  applicationName: "Loop",
 };
 
 export default function RootLayout({
