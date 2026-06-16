@@ -21,10 +21,14 @@ export function StockList({
   stocks,
   snapshots,
   chartReady,
+  syncing = false,
+  priceTotal = 0,
 }: {
   stocks: CryptoStock[];
   snapshots: Record<string, MarketSnapshot>;
   chartReady: Set<string>;
+  syncing?: boolean;
+  priceTotal?: number;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -44,7 +48,11 @@ export function StockList({
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-zinc-100">Markets</h2>
-          <p className="text-xs text-zinc-500">{stocks.length} stocks with live data</p>
+          <p className="text-xs text-zinc-500">
+            {syncing && priceTotal > 0
+              ? `${stocks.filter((s) => snapshots[s.ticker]?.mkt_price).length} of ${priceTotal} prices loaded`
+              : `${stocks.length} stocks with live data`}
+          </p>
         </div>
         <div className="relative">
           <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

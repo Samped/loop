@@ -26,7 +26,7 @@ export function Dashboard() {
   const loadMarketData = useCallback(async () => {
     setLoading(true);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8_000);
+    const timeout = setTimeout(() => controller.abort(), 12_000);
     try {
       const res = await fetch("/api/market/bootstrap", { signal: controller.signal });
       if (!res.ok) return;
@@ -55,6 +55,39 @@ export function Dashboard() {
     const id = setTimeout(() => void loadMarketData(), 0);
     return () => clearTimeout(id);
   }, [loadMarketData]);
+
+  useEffect(() => {
+    if (loading || !pricesRefreshing) return;
+    if (priceTotal > 0 && listedTickers.size >= priceTotal) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/market/snapshots");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          snapshots?: Record<string, MarketSnapshot>;
+          count?: number;
+          total?: number;
+          refreshing?: boolean;
+        };
+        if (data.snapshots) {
+          setSnapshots(data.snapshots);
+          const withPrice = Object.entries(data.snapshots)
+            .filter(([, snap]) => snap.mkt_price > 0 && snap.total_marketcap > 0)
+            .map(([ticker]) => ticker);
+          setListedTickers(new Set(withPrice));
+        }
+        if (data.total != null) setPriceTotal(data.total);
+        setPricesRefreshing(data.refreshing === true);
+      } catch {
+        // keep polling
+      }
+    };
+
+    const id = setInterval(() => void poll(), 3_000);
+    void poll();
+    return () => clearInterval(id);
+  }, [loading, pricesRefreshing, listedTickers.size, priceTotal]);
 
   useEffect(() => {
     if (loading) return;
@@ -110,16 +143,25 @@ export function Dashboard() {
     return () => es.close();
   }, [loading]);
 
+  const pricedCount = useMemo(
+    () =>
+      catalog.filter((s) => {
+        const snap = snapshots[s.ticker];
+        return Boolean(snap && snap.mkt_price > 0 && snap.total_marketcap > 0);
+      }).length,
+    [catalog, snapshots],
+  );
+
   const liveSub =
-    pricesRefreshing && listedStocks.length < priceTotal
-      ? `Syncing ${listedStocks.length} of ${priceTotal}`
+    pricesRefreshing && pricedCount < priceTotal
+      ? `Syncing ${pricedCount} of ${priceTotal}`
       : chartReady.size > 0
         ? `${chartReady.size} charts ready`
         : "Charts syncing";
 
   const syncProgress =
-    pricesRefreshing && listedStocks.length < priceTotal
-      ? Math.min(100, (listedStocks.length / priceTotal) * 100)
+    pricesRefreshing && pricedCount < priceTotal
+      ? Math.min(100, (pricedCount / priceTotal) * 100)
       : 100;
 
   return (
@@ -134,7 +176,7 @@ export function Dashboard() {
           <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
             <DashboardStatCard
               label="Live Prices"
-              value={`${listedStocks.length} stocks`}
+              value={`${pricedCount} stocks`}
               sub={liveSub}
               accent="emerald"
               footer={
@@ -153,7 +195,13 @@ export function Dashboard() {
 
           <SectorCards sectors={sectors} source={marketSource} />
 
-          <StockList stocks={listedStocks} snapshots={snapshots} chartReady={chartReady} />
+          <StockList
+            stocks={catalog.length > 0 ? catalog : listedStocks}
+            snapshots={snapshots}
+            chartReady={chartReady}
+            syncing={pricesRefreshing && pricedCount < priceTotal}
+            priceTotal={priceTotal}
+          />
         </div>
       )}
     </div>

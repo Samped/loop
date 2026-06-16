@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCachedCryptoStocks } from "@/lib/market-data";
-import { ensureInitialSnapshots, hasLiveMarketApi, isVercelServerless } from "@/lib/market-cold-start";
+import {
+  ensureInitialSnapshots,
+  hasLiveMarketApi,
+  isSnapshotPrefetchActive,
+  isVercelServerless,
+  startBackgroundSnapshotPrefetch,
+} from "@/lib/market-cold-start";
 import { getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { isSnapshotWarmerActive, startSnapshotWarmer } from "@/lib/snapshot-warmer";
 import { mergePriceSources } from "@/lib/snapshot-utils";
@@ -11,11 +17,9 @@ export const maxDuration = 25;
 
 export async function GET() {
   hydrateSnapshotStore();
-  if (!isVercelServerless) {
-    startSnapshotWarmer();
-  }
+  startSnapshotWarmer();
 
-  let stocks = getStoredStocks() ?? DEMO_STOCKS;
+  let stocks = getStoredStocks() ?? (hasLiveMarketApi() ? [] : DEMO_STOCKS);
   try {
     const refreshed = await withTimeout(getCachedCryptoStocks(), 6_000);
     if (refreshed) stocks = refreshed.stocks;
@@ -23,7 +27,12 @@ export async function GET() {
     // keep stored or demo
   }
 
-  await ensureInitialSnapshots(stocks, { demo: !hasLiveMarketApi() });
+  const prefetchOptions = { demo: !hasLiveMarketApi() };
+  if (isVercelServerless) {
+    startBackgroundSnapshotPrefetch(stocks, prefetchOptions);
+  } else {
+    await ensureInitialSnapshots(stocks, prefetchOptions);
+  }
 
   const tickers = stocks.map((s) => s.ticker);
   const cached = getStoredSnapshots();
@@ -33,7 +42,10 @@ export async function GET() {
     snapshots,
     count: Object.keys(snapshots).length,
     total: tickers.length,
-    refreshing: !isVercelServerless && isSnapshotWarmerActive(),
+    refreshing:
+      Object.keys(snapshots).length < tickers.length ||
+      isSnapshotPrefetchActive() ||
+      isSnapshotWarmerActive(),
     source: hasLiveMarketApi() ? "live" : "demo",
   });
 }
