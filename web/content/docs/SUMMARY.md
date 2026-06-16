@@ -1,0 +1,18 @@
+# Summary
+
+* [Welcome](README.md)
+* [What is Loop?](what-is-loop.md)
+* [Who is it for?](who-is-it-for.md)
+* [Core concepts](core-concepts.md)
+* [Features](features-walkthrough.md)
+* [How trading works](how-trading-works.md)
+* [System architecture](system-architecture.md)
+* [Smart contracts](smart-contracts.md)
+* [Data sources](data-sources-market-intelligence.md)
+* [API reference](api-reference.md)
+* [Environment variables](environment-variables.md)
+* [Local development](local-development.md)
+* [Deployment](deployment-vercel-custom-domain.md)
+* [Security](security-model.md)
+* [Glossary](glossary.md)
+* [FAQ](faq-troubleshooting.md)
