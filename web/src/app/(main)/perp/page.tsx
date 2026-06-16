@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { CryptoStock, MarketSnapshot } from "@/lib/sosovalue";
 import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
 import { PerpMarketsList } from "@/components/PerpMarketsList";
+import { fetchJson } from "@/lib/fetch-json";
 
 const POLL_MS = 5_000;
 
@@ -13,21 +14,28 @@ export default function PerpMarketsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       const [stocksRes, snapsRes] = await Promise.all([
-        fetch("/api/market/stocks").then((r) => (r.ok ? r.json() : { stocks: [] })),
-        fetch("/api/market/snapshots").then((r) => (r.ok ? r.json() : { snapshots: {} })),
+        fetchJson<{ stocks?: CryptoStock[] }>("/api/market/stocks"),
+        fetchJson<{ snapshots?: Record<string, MarketSnapshot> }>("/api/market/snapshots"),
       ]);
-      const all = (stocksRes.stocks ?? []) as CryptoStock[];
+      if (cancelled) return;
+
+      const all = stocksRes?.stocks ?? [];
       const perpSet = new Set<string>(PERP_MARKET_TICKERS);
       setStocks(all.filter((s) => perpSet.has(s.ticker)));
-      setSnapshots(snapsRes.snapshots ?? {});
+      setSnapshots(snapsRes?.snapshots ?? {});
       setLoading(false);
     }
 
     void load();
     const interval = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   return (

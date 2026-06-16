@@ -7,6 +7,7 @@ import { StockOverview } from "@/components/StockOverview";
 import { PerpPanel } from "@/components/PerpPanel";
 import { PerpLiveMarkChart } from "@/components/PerpLiveMarkChart";
 import { useLivePerpMark } from "@/hooks/useLivePerpMark";
+import { fetchJson } from "@/lib/fetch-json";
 
 type StockApiResponse = { stock?: CryptoStock };
 type SnapshotApiResponse = { snapshot?: MarketSnapshot };
@@ -20,20 +21,19 @@ export function PerpDetail({ ticker }: { ticker: string }) {
   const { livePrice } = useLivePerpMark(upper, snapshot?.mkt_price);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       setLoading(true);
       try {
         const [stockRes, snapRes] = await Promise.all([
-          fetch(`/api/market/stock/${upper}`).then(
-            (r): Promise<StockApiResponse> => (r.ok ? r.json() : Promise.resolve({})),
-          ),
-          fetch(`/api/market/snapshot/${upper}`).then(
-            (r): Promise<SnapshotApiResponse> => (r.ok ? r.json() : Promise.resolve({})),
-          ),
+          fetchJson<StockApiResponse>(`/api/market/stock/${upper}`),
+          fetchJson<SnapshotApiResponse>(`/api/market/snapshot/${upper}`),
         ]);
+        if (cancelled) return;
 
         setStock(
-          stockRes.stock ?? {
+          stockRes?.stock ?? {
             ticker: upper,
             name: upper,
             exchange: "",
@@ -42,12 +42,15 @@ export function PerpDetail({ ticker }: { ticker: string }) {
             listing_time: "",
           },
         );
-        setSnapshot(snapRes.snapshot ?? null);
+        setSnapshot(snapRes?.snapshot ?? null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    load();
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, [upper]);
 
   useEffect(() => {
