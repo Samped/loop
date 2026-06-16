@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getOracleSyncStatus, recordManualOracleSync, startOracleSyncer } from "@/lib/oracle-syncer";
 import { syncPricesToContract } from "@/lib/oracle";
-import { rateLimit, requireAdmin } from "@/lib/api-guard";
+import { rateLimit, rateLimitJobStart, requireAdmin, sanitizeApiError } from "@/lib/api-guard";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = rateLimitJobStart(req, "oracle-sync");
+  if (limited) return limited;
   startOracleSyncer();
   return NextResponse.json(getOracleSyncStatus());
 }
@@ -17,9 +19,8 @@ export async function POST(req: Request) {
   try {
     const result = await syncPricesToContract();
     recordManualOracleSync(result);
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, synced: result.tickers?.length ?? 0 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Price sync failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    return NextResponse.json({ ok: false, error: sanitizeApiError(err) }, { status: 400 });
   }
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { syncPerpMarkPricesAndLiquidate } from "@/lib/perp-oracle";
 import { liquidateUnderwaterPositions } from "@/lib/perp-liquidator";
-import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
+import { PERP_MARKET_TICKERS, filterPerpMarketTickers } from "@/lib/perp-markets";
 import { rateLimit, requireAdmin } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +14,17 @@ export async function POST(req: Request) {
   if (denied) return denied;
 
   const body = await req.json().catch(() => ({}));
-  const tickers =
+  const requested =
     Array.isArray(body.tickers) && body.tickers.length
-      ? (body.tickers as string[]).map((t) => t.toUpperCase())
+      ? filterPerpMarketTickers(body.tickers as string[])
       : [...PERP_MARKET_TICKERS];
 
-  const sync = await syncPerpMarkPricesAndLiquidate(tickers);
-  const liquidation = await liquidateUnderwaterPositions(tickers);
+  if (Array.isArray(body.tickers) && body.tickers.length && !requested.length) {
+    return NextResponse.json({ error: "No valid perp tickers" }, { status: 400 });
+  }
+
+  const sync = await syncPerpMarkPricesAndLiquidate(requested);
+  const liquidation = await liquidateUnderwaterPositions(requested);
 
   return NextResponse.json({ sync, liquidation });
 }

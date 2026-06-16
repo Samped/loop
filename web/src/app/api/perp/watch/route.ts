@@ -3,6 +3,7 @@ import { isAddress } from "viem";
 import { registerPerpTrader, unregisterPerpTrader } from "@/lib/perp-trader-registry";
 import { syncPerpPricesNow } from "@/lib/perp-syncer";
 import { rateLimit } from "@/lib/api-guard";
+import { isPerpMarketTicker } from "@/lib/perp-markets";
 
 export async function POST(req: Request) {
   const limited = rateLimit(req, "api:perp-watch-post", 120, 60_000);
@@ -13,8 +14,8 @@ export async function POST(req: Request) {
   const ticker = String(body.ticker ?? "").toUpperCase();
   const open = body.open !== false;
 
-  if (!isAddress(address) || !ticker) {
-    return NextResponse.json({ error: "Invalid address or ticker" }, { status: 400 });
+  if (!isAddress(address) || !isPerpMarketTicker(ticker)) {
+    return NextResponse.json({ error: "Invalid address or perp ticker" }, { status: 400 });
   }
 
   if (open) {
