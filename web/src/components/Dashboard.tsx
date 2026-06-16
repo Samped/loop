@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CryptoStock, MarketSnapshot, Sector } from "@/lib/sosovalue";
+import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
 import { SectorCards } from "@/components/SectorCards";
 import { StockList } from "@/components/StockList";
 import { DashboardStatCard, PerpPromoCard } from "@/components/PerpPromoCard";
 import { DashboardPerpPositions } from "@/components/DashboardPerpPositions";
+
+const MAX_POLL_ROUNDS = 20;
 
 export function Dashboard() {
   const [catalog, setCatalog] = useState<CryptoStock[]>([]);
@@ -15,25 +18,26 @@ export function Dashboard() {
   const [snapshots, setSnapshots] = useState<Record<string, MarketSnapshot>>({});
   const [marketSource, setMarketSource] = useState("demo");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [priceTotal, setPriceTotal] = useState(0);
   const [pricesRefreshing, setPricesRefreshing] = useState(false);
-
-  const listedStocks = useMemo(
-    () => catalog.filter((s) => listedTickers.has(s.ticker)),
-    [catalog, listedTickers],
-  );
+  const [pollRounds, setPollRounds] = useState(0);
 
   const loadMarketData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
+    setPollRounds(0);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
       const res = await fetch("/api/market/bootstrap", { signal: controller.signal });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`bootstrap ${res.status}`);
       const bootstrapRes = await res.json();
 
       const allStocks: CryptoStock[] = bootstrapRes.allStocks ?? bootstrapRes.stocks ?? [];
       const initialListed: CryptoStock[] = bootstrapRes.stocks ?? [];
+
+      if (allStocks.length === 0) throw new Error("empty catalog");
 
       setCatalog(allStocks);
       setListedTickers(new Set(initialListed.map((s) => s.ticker)));
@@ -44,7 +48,13 @@ export function Dashboard() {
       setPriceTotal(bootstrapRes.priceTotal ?? allStocks.length);
       setPricesRefreshing(bootstrapRes.pricesRefreshing === true);
     } catch {
-      // Show UI with empty/demo state rather than infinite spinner
+      setCatalog(DEMO_STOCKS);
+      setListedTickers(new Set(DEMO_STOCKS.map((s) => s.ticker)));
+      setSectors(DEMO_SECTORS);
+      setMarketSource("demo");
+      setPriceTotal(DEMO_STOCKS.length);
+      setPricesRefreshing(false);
+      setLoadError(true);
     } finally {
       clearTimeout(timeout);
       setLoading(false);
@@ -57,8 +67,7 @@ export function Dashboard() {
   }, [loadMarketData]);
 
   useEffect(() => {
-    if (loading || !pricesRefreshing) return;
-    if (priceTotal > 0 && listedTickers.size >= priceTotal) return;
+    if (loading || !pricesRefreshing || pollRounds >= MAX_POLL_ROUNDS) return;
 
     const poll = async () => {
       try {
@@ -66,7 +75,6 @@ export function Dashboard() {
         if (!res.ok) return;
         const data = (await res.json()) as {
           snapshots?: Record<string, MarketSnapshot>;
-          count?: number;
           total?: number;
           refreshing?: boolean;
         };
@@ -80,68 +88,22 @@ export function Dashboard() {
         if (data.total != null) setPriceTotal(data.total);
         setPricesRefreshing(data.refreshing === true);
       } catch {
-        // keep polling
+        // stop after max rounds
+      } finally {
+        setPollRounds((n) => n + 1);
       }
     };
 
     const id = setInterval(() => void poll(), 3_000);
     void poll();
     return () => clearInterval(id);
-  }, [loading, pricesRefreshing, listedTickers.size, priceTotal]);
+  }, [loading, pricesRefreshing, pollRounds]);
 
   useEffect(() => {
-    if (loading) return;
-
-    const es = new EventSource("/api/market/prices/stream");
-
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as {
-          type?: string;
-          ticker?: string;
-          tickers?: string[];
-          snapshot?: MarketSnapshot;
-          snapshots?: Record<string, MarketSnapshot>;
-          count?: number;
-          total?: number;
-        };
-
-        if (data.type === "listed_batch" && data.tickers) {
-          setListedTickers(new Set(data.tickers));
-          if (data.snapshots) setSnapshots(data.snapshots);
-          setPriceTotal(data.total ?? data.tickers.length);
-        }
-
-        if (data.type === "chart_batch" && data.tickers) {
-          setChartReady(new Set(data.tickers));
-        }
-
-        if (data.type === "listed" && data.ticker) {
-          setListedTickers((prev) => new Set([...prev, data.ticker!]));
-          if (data.snapshot) {
-            setSnapshots((prev) => ({ ...prev, [data.ticker!]: data.snapshot! }));
-          }
-        }
-
-        if (data.type === "chart" && data.ticker) {
-          setChartReady((prev) => new Set([...prev, data.ticker!]));
-        }
-
-        if (data.total != null && data.count != null) {
-          setPricesRefreshing(data.count < data.total);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    es.onerror = () => {
-      es.close();
+    if (pollRounds >= MAX_POLL_ROUNDS && pricesRefreshing) {
       setPricesRefreshing(false);
-    };
-
-    return () => es.close();
-  }, [loading]);
+    }
+  }, [pollRounds, pricesRefreshing]);
 
   const pricedCount = useMemo(
     () =>
@@ -157,11 +119,13 @@ export function Dashboard() {
       ? `Syncing ${pricedCount} of ${priceTotal}`
       : chartReady.size > 0
         ? `${chartReady.size} charts ready`
-        : "Charts syncing";
+        : loadError
+          ? "Showing demo markets"
+          : "Charts syncing";
 
   const syncProgress =
     pricesRefreshing && pricedCount < priceTotal
-      ? Math.min(100, (pricedCount / priceTotal) * 100)
+      ? Math.min(100, (pricedCount / Math.max(priceTotal, 1)) * 100)
       : 100;
 
   return (
@@ -196,11 +160,12 @@ export function Dashboard() {
           <SectorCards sectors={sectors} source={marketSource} />
 
           <StockList
-            stocks={catalog.length > 0 ? catalog : listedStocks}
+            stocks={catalog}
             snapshots={snapshots}
             chartReady={chartReady}
             syncing={pricesRefreshing && pricedCount < priceTotal}
             priceTotal={priceTotal}
+            onRetry={loadError ? loadMarketData : undefined}
           />
         </div>
       )}

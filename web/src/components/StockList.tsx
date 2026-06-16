@@ -23,12 +23,14 @@ export function StockList({
   chartReady,
   syncing = false,
   priceTotal = 0,
+  onRetry,
 }: {
   stocks: CryptoStock[];
   snapshots: Record<string, MarketSnapshot>;
   chartReady: Set<string>;
   syncing?: boolean;
   priceTotal?: number;
+  onRetry?: () => void;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -69,6 +71,19 @@ export function StockList({
       </div>
 
       {stocks.length === 0 ? (
+        <div className="glass-card flex flex-col items-center justify-center rounded-2xl py-16">
+          <p className="text-sm text-zinc-500">Could not load the market catalog.</p>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-4 rounded-lg border border-white/[0.1] bg-white/[0.04] px-4 py-2 text-sm text-zinc-300 hover:bg-white/[0.08]"
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : syncing && stocks.every((s) => !snapshots[s.ticker]?.mkt_price) ? (
         <div className="glass-card flex flex-col items-center justify-center rounded-2xl py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
           <p className="mt-4 text-sm text-zinc-500">Loading stock prices…</p>
