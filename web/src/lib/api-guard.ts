@@ -53,3 +53,14 @@ export function requireAdmin(req: Request): NextResponse | null {
   }
   return null;
 }
+
+/** Avoid leaking RPC URLs, revert data, or stack traces to clients. */
+export function sanitizeApiError(err: unknown): string {
+  void err;
+  return "Request failed";
+}
+
+/** Rate-limit idempotent background job starts from public HTTP handlers. */
+export function rateLimitJobStart(req: Request, jobKey: string): NextResponse | null {
+  return rateLimit(req, `job-start:${jobKey}`, 30, 60_000);
+}
