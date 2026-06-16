@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
-import { ensureInitialSnapshots, isVercelServerless } from "@/lib/market-cold-start";
+import { ensureInitialSnapshots, hasLiveMarketApi, isVercelServerless } from "@/lib/market-cold-start";
 import { getStoredSectors, getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { isSnapshotWarmerActive, startSnapshotWarmer } from "@/lib/snapshot-warmer";
 import { startOracleSyncer } from "@/lib/oracle-syncer";
@@ -10,9 +10,9 @@ import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
 import { rateLimit } from "@/lib/api-guard";
 import { withTimeout } from "@/lib/async-timeout";
 
-const LIVE_REFRESH_MS = 5_000;
+const LIVE_REFRESH_MS = 8_000;
 
-export const maxDuration = 15;
+export const maxDuration = 25;
 
 export async function GET(req: Request) {
   const limited = rateLimit(req, "api:bootstrap-get", 120, 60_000);
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
 
   let allStocks = getStoredStocks() ?? DEMO_STOCKS;
   let sectors = getStoredSectors() ?? DEMO_SECTORS;
-  let marketSource = allStocks.length === DEMO_STOCKS.length ? "demo" : "sosovalue";
+  let marketSource = hasLiveMarketApi() ? "sosovalue" : "demo";
 
   try {
     const refreshed = await withTimeout(
@@ -37,13 +37,12 @@ export async function GET(req: Request) {
     if (refreshed) {
       allStocks = refreshed[0].stocks;
       sectors = refreshed[1].sectors;
-      marketSource = "sosovalue";
     }
   } catch {
-    if (allStocks === DEMO_STOCKS) marketSource = "demo";
+    if (!hasLiveMarketApi()) marketSource = "demo";
   }
 
-  await ensureInitialSnapshots(allStocks, { demo: marketSource === "demo" });
+  await ensureInitialSnapshots(allStocks, { demo: !hasLiveMarketApi() });
 
   const snapshots = filterListedSnapshots(getStoredSnapshots());
   const listedStocks = allStocks.filter((s) => isStockListed(s.ticker));

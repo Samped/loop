@@ -25,7 +25,19 @@ export default function PerpMarketsPage() {
 
       const all = stocksRes?.stocks ?? [];
       const perpSet = new Set<string>(PERP_MARKET_TICKERS);
-      setStocks(all.filter((s) => perpSet.has(s.ticker)));
+      const byTicker = new Map(all.map((s) => [s.ticker, s]));
+      const perpStocks = PERP_MARKET_TICKERS.map(
+        (ticker) =>
+          byTicker.get(ticker) ?? {
+            ticker,
+            name: ticker,
+            exchange: "",
+            sector: "",
+            introduction: "",
+            listing_time: "",
+          },
+      );
+      setStocks(perpStocks.filter((s) => perpSet.has(s.ticker)));
       setSnapshots(snapsRes?.snapshots ?? {});
       setLoading(false);
     }

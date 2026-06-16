@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getCached, getStale } from "@/lib/market-cache";
 import { getCachedCryptoStocks } from "@/lib/market-data";
-import { ensureInitialSnapshots, isVercelServerless } from "@/lib/market-cold-start";
-import { mergePriceSources } from "@/lib/snapshot-utils";
+import { ensureInitialSnapshots, hasLiveMarketApi, isVercelServerless } from "@/lib/market-cold-start";
 import { getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { isSnapshotWarmerActive, startSnapshotWarmer } from "@/lib/snapshot-warmer";
-import type { MarketSnapshot } from "@/lib/sosovalue";
+import { mergePriceSources } from "@/lib/snapshot-utils";
+import { withTimeout } from "@/lib/async-timeout";
 import { DEMO_STOCKS } from "@/lib/sosovalue";
+
+export const maxDuration = 25;
 
 export async function GET() {
   hydrateSnapshotStore();
@@ -16,21 +17,16 @@ export async function GET() {
 
   let stocks = getStoredStocks() ?? DEMO_STOCKS;
   try {
-    const refreshed = await getCachedCryptoStocks();
-    stocks = refreshed.stocks;
+    const refreshed = await withTimeout(getCachedCryptoStocks(), 6_000);
+    if (refreshed) stocks = refreshed.stocks;
   } catch {
     // keep stored or demo
   }
 
-  await ensureInitialSnapshots(stocks, { demo: !process.env.SOSOVALUE_API_KEY });
+  await ensureInitialSnapshots(stocks, { demo: !hasLiveMarketApi() });
+
   const tickers = stocks.map((s) => s.ticker);
   const cached = getStoredSnapshots();
-
-  for (const ticker of tickers) {
-    const mem = getCached<MarketSnapshot>(`snapshot:${ticker}`) ?? getStale<MarketSnapshot>(`snapshot:${ticker}`);
-    if (mem) cached[ticker] = mem;
-  }
-
   const snapshots = mergePriceSources(tickers, cached, {});
 
   return NextResponse.json({
@@ -38,6 +34,6 @@ export async function GET() {
     count: Object.keys(snapshots).length,
     total: tickers.length,
     refreshing: !isVercelServerless && isSnapshotWarmerActive(),
-    source: Object.keys(cached).length > 0 ? "cache" : "none",
+    source: hasLiveMarketApi() ? "live" : "demo",
   });
 }

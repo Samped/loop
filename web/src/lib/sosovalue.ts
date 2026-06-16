@@ -80,6 +80,26 @@ export async function getSectors(): Promise<Sector[]> {
   }));
 }
 
+/** Fetch snapshots for many tickers in parallel (no inter-batch delay — for cold start). */
+export async function getMarketSnapshotsParallel(
+  tickers: string[],
+  chunkSize = 20,
+): Promise<Record<string, MarketSnapshot>> {
+  const result: Record<string, MarketSnapshot> = {};
+
+  for (let i = 0; i < tickers.length; i += chunkSize) {
+    const batch = tickers.slice(i, i + chunkSize);
+    const settled = await Promise.allSettled(batch.map((t) => getMarketSnapshot(t)));
+    for (let j = 0; j < settled.length; j++) {
+      if (settled[j].status === "fulfilled") {
+        result[batch[j]!] = (settled[j] as PromiseFulfilledResult<MarketSnapshot>).value;
+      }
+    }
+  }
+
+  return result;
+}
+
 /** Fetch snapshots for many tickers (respects ~20 req/min rate limit) */
 export async function getMarketSnapshotsBatch(tickers: string[]): Promise<Record<string, MarketSnapshot>> {
   const result: Record<string, MarketSnapshot> = {};
@@ -222,6 +242,8 @@ export const DEMO_STOCKS: CryptoStock[] = [
   { ticker: "COIN", name: "Coinbase", exchange: "NASDAQ", sector: "Exchange", introduction: "", listing_time: "2023-10-11" },
   { ticker: "HOOD", name: "Robinhood", exchange: "NASDAQ", sector: "Exchange", introduction: "", listing_time: "2023-10-11" },
   { ticker: "TSLA", name: "Tesla", exchange: "NASDAQ", sector: "BTC Treasury", introduction: "", listing_time: "2023-10-11" },
+  { ticker: "MARA", name: "MARA Holdings", exchange: "NASDAQ", sector: "Mining", introduction: "", listing_time: "2023-10-11" },
+  { ticker: "RIOT", name: "Riot Platforms", exchange: "NASDAQ", sector: "Mining", introduction: "", listing_time: "2023-10-11" },
 ];
 
 export const DEMO_SECTORS: Sector[] = [
@@ -235,5 +257,6 @@ export const DEMO_SNAPSHOTS: Record<string, MarketSnapshot> = {
   MSTR: { timestamp: Date.now(), ticker: "MSTR", mkt_price: 412.5, mkt_status: "open", volume: 2_400_000, turnover: 990_000_000, circulating_marketcap: 82_000_000_000, total_marketcap: 82_000_000_000, pe_ttm: 18.2, pb: 4.1 },
   COIN: { timestamp: Date.now(), ticker: "COIN", mkt_price: 245.3, mkt_status: "open", volume: 5_100_000, turnover: 1_250_000_000, circulating_marketcap: 62_000_000_000, total_marketcap: 62_000_000_000, pe_ttm: 32.1, pb: 6.8 },
   HOOD: { timestamp: Date.now(), ticker: "HOOD", mkt_price: 38.7, mkt_status: "open", volume: 8_200_000, turnover: 317_000_000, circulating_marketcap: 34_000_000_000, total_marketcap: 34_000_000_000, pe_ttm: 45.0, pb: 3.2 },
-  TSLA: { timestamp: Date.now(), ticker: "TSLA", mkt_price: 278.9, mkt_status: "open", volume: 45_000_000, turnover: 12_550_000_000, circulating_marketcap: 890_000_000_000, total_marketcap: 890_000_000_000, pe_ttm: 65.3, pb: 12.4 },
+  MARA: { timestamp: Date.now(), ticker: "MARA", mkt_price: 18.4, mkt_status: "open", volume: 12_000_000, turnover: 220_000_000, circulating_marketcap: 4_800_000_000, total_marketcap: 4_800_000_000, pe_ttm: 12.5, pb: 2.1 },
+  RIOT: { timestamp: Date.now(), ticker: "RIOT", mkt_price: 12.8, mkt_status: "open", volume: 9_500_000, turnover: 121_000_000, circulating_marketcap: 3_200_000_000, total_marketcap: 3_200_000_000, pe_ttm: 15.2, pb: 1.8 },
 };

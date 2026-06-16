@@ -1,21 +1,24 @@
 import "server-only";
 
-import { getCachedMarketSnapshot } from "@/lib/market-data";
 import { bulkSetStoredSnapshots } from "@/lib/snapshot-store";
 import { isStockListed } from "@/lib/stock-ready";
 import { withTimeout } from "@/lib/async-timeout";
-import { DEMO_SNAPSHOTS, type CryptoStock } from "@/lib/sosovalue";
+import {
+  DEMO_SNAPSHOTS,
+  getMarketSnapshotsParallel,
+  type CryptoStock,
+} from "@/lib/sosovalue";
 
 export const isVercelServerless = Boolean(process.env.VERCEL);
 
-const INITIAL_SNAPSHOT_BATCH = 12;
-const LIVE_PREFETCH_TIMEOUT_MS = 7_000;
+const PARALLEL_CHUNK = 20;
+const LIVE_PREFETCH_TIMEOUT_MS = 12_000;
 
 function countListed(stocks: CryptoStock[]): number {
   return stocks.filter((s) => isStockListed(s.ticker)).length;
 }
 
-/** Instant demo prices when SoSoValue is unavailable or still warming. */
+/** Instant demo prices when SoSoValue is unavailable. */
 export function seedDemoSnapshots(stocks: CryptoStock[]) {
   const batch: Record<string, import("@/lib/sosovalue").MarketSnapshot> = {};
   for (const stock of stocks) {
@@ -25,7 +28,7 @@ export function seedDemoSnapshots(stocks: CryptoStock[]) {
   if (Object.keys(batch).length > 0) bulkSetStoredSnapshots(batch);
 }
 
-/** Load first-page prices during the request so serverless cold starts show markets immediately. */
+/** Load prices for the full catalog in parallel (serverless cold start). */
 export async function ensureInitialSnapshots(
   stocks: CryptoStock[],
   options?: { demo?: boolean },
@@ -37,21 +40,14 @@ export async function ensureInitialSnapshots(
     return countListed(stocks);
   }
 
-  const tickers = stocks.slice(0, INITIAL_SNAPSHOT_BATCH).map((s) => s.ticker);
+  const tickers = stocks.map((s) => s.ticker);
   const fetched = await withTimeout(
-    Promise.allSettled(tickers.map((ticker) => getCachedMarketSnapshot(ticker))),
+    getMarketSnapshotsParallel(tickers, PARALLEL_CHUNK),
     LIVE_PREFETCH_TIMEOUT_MS,
   );
 
-  if (fetched) {
-    const batch: Record<string, import("@/lib/sosovalue").MarketSnapshot> = {};
-    for (let i = 0; i < fetched.length; i++) {
-      const outcome = fetched[i];
-      if (outcome?.status === "fulfilled") {
-        batch[tickers[i]!] = outcome.value.snapshot;
-      }
-    }
-    if (Object.keys(batch).length > 0) bulkSetStoredSnapshots(batch);
+  if (fetched && Object.keys(fetched).length > 0) {
+    bulkSetStoredSnapshots(fetched);
   }
 
   if (countListed(stocks) === 0) {
@@ -59,4 +55,8 @@ export async function ensureInitialSnapshots(
   }
 
   return countListed(stocks);
+}
+
+export function hasLiveMarketApi(): boolean {
+  return Boolean(process.env.SOSOVALUE_API_KEY);
 }
