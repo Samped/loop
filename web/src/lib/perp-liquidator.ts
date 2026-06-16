@@ -8,10 +8,10 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "@/lib/arc-chain";
-import { getOraclePrivateKey } from "@/lib/config";
+import { getOraclePrivateKey } from "@/lib/config-secrets";
 import { perpEngineAbi, perpEngineEventsAbi } from "@/lib/contracts/perp-engine";
 import { computeUnrealizedPnlUsdc6, isLiquidatableOnChain, parsePerpSide } from "@/lib/perp";
-import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
+import { PERP_MARKET_TICKERS, filterPerpMarketTickers } from "@/lib/perp-markets";
 import {
   getRegisteredPerpTraders,
   registerPerpTrader,
@@ -195,7 +195,8 @@ export async function liquidateUnderwaterPositions(tickers?: string[]): Promise<
   if (!engine) return { checked: 0, liquidated: 0, error: "PERP_ENGINE_ADDRESS not configured" };
   if (!key) return { checked: 0, liquidated: 0, error: "ORACLE_PRIVATE_KEY not configured" };
 
-  const targets = tickers?.length ? tickers : [...PERP_MARKET_TICKERS];
+  const targets = tickers?.length ? filterPerpMarketTickers(tickers) : [...PERP_MARKET_TICKERS];
+  if (!targets.length) return { checked: 0, liquidated: 0, error: "No valid perp tickers" };
   const account = privateKeyToAccount(key);
   const transport = http(ARC_RPC_URL);
   const publicClient = createPublicClient({ chain: arcTestnet, transport });

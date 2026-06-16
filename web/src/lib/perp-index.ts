@@ -2,6 +2,9 @@ import { getFinnhubQuote } from "@/lib/finnhub";
 import { getStoredSnapshot, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { getMarketSnapshot } from "@/lib/sosovalue";
 
+const INDEX_CACHE_MS = Number(process.env.PERP_INDEX_CACHE_MS) || 2_000;
+const indexCache = new Map<string, { sample: StockIndexSample; at: number }>();
+
 export type StockIndexSample = {
   price: number;
   sourceCount: number;
@@ -20,6 +23,17 @@ function median(values: number[]): number {
  * No synthetic noise — unpredictability comes from real markets.
  */
 export async function fetchStockIndexPrice(ticker: string): Promise<StockIndexSample | null> {
+  const upper = ticker.toUpperCase();
+  const now = Date.now();
+  const cached = indexCache.get(upper);
+  if (cached && now - cached.at < INDEX_CACHE_MS) return cached.sample;
+
+  const sample = await fetchStockIndexPriceFresh(upper);
+  if (sample) indexCache.set(upper, { sample, at: now });
+  return sample;
+}
+
+async function fetchStockIndexPriceFresh(ticker: string): Promise<StockIndexSample | null> {
   const upper = ticker.toUpperCase();
   const samples: { price: number; source: string }[] = [];
 

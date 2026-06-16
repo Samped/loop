@@ -1,7 +1,8 @@
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "@/lib/arc-chain";
-import { getOraclePrivateKey, getStockVaultAddress } from "@/lib/config";
+import { getStockVaultAddress } from "@/lib/config";
+import { getOraclePrivateKey } from "@/lib/config-secrets";
 import { stockVaultAbi } from "@/lib/contracts/stock-vault";
 import { getCachedCryptoStocks, getCachedMarketSnapshot } from "@/lib/market-data";
 import { bulkSetStoredSnapshots, getStoredSnapshot } from "@/lib/snapshot-store";

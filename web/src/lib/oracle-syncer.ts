@@ -1,5 +1,6 @@
 import { syncPricesToContract } from "@/lib/oracle";
-import { getOraclePrivateKey, getStockVaultAddress } from "@/lib/config";
+import { getStockVaultAddress } from "@/lib/config";
+import { getOraclePrivateKey } from "@/lib/config-secrets";
 import { hydrateSnapshotStore } from "@/lib/snapshot-store";
 
 const DEFAULT_INTERVAL_MS = 60_000;

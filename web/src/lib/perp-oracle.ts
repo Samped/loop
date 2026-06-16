@@ -2,11 +2,11 @@ import { randomBytes } from "crypto";
 import { createPublicClient, createWalletClient, http, keccak256, stringToBytes, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "@/lib/arc-chain";
-import { getOraclePrivateKey } from "@/lib/config";
+import { getOraclePrivateKey } from "@/lib/config-secrets";
 import { perpEngineAbi } from "@/lib/contracts/perp-engine";
-import { getPerpMarkSnapshot } from "@/lib/perp-mark-engine";
+import { advancePerpMark } from "@/lib/perp-mark-engine";
 import { isAnyTraderLiquidatableAtMark } from "@/lib/perp-liquidator";
-import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
+import { PERP_MARKET_TICKERS, filterPerpMarketTickers } from "@/lib/perp-markets";
 
 const BATCH_SIZE = 50;
 const ARC_RPC_URL = arcTestnet.rpcUrls.default.http[0];
@@ -72,7 +72,8 @@ export async function syncPerpMarkPrices(tickers?: string[]): Promise<PerpOracle
   if (!engine) return { synced: 0, error: "PERP_ENGINE_ADDRESS not configured" };
   if (!key) return { synced: 0, error: "ORACLE_PRIVATE_KEY not configured" };
 
-  const targets = tickers?.length ? tickers : [...PERP_MARKET_TICKERS];
+  const targets = tickers?.length ? filterPerpMarketTickers(tickers) : [...PERP_MARKET_TICKERS];
+  if (!targets.length) return { synced: 0, error: "No valid perp tickers" };
   const account = privateKeyToAccount(key);
   const transport = http(ARC_RPC_URL);
   const publicClient = createPublicClient({ chain: arcTestnet, transport });
@@ -80,7 +81,7 @@ export async function syncPerpMarkPrices(tickers?: string[]): Promise<PerpOracle
 
   const targetByTicker = new Map<string, bigint>();
   for (const ticker of targets) {
-    const snap = await getPerpMarkSnapshot(ticker);
+    const snap = await advancePerpMark(ticker);
     const oraclePrice = snap?.price ?? snap?.twapPrice;
     if (oraclePrice && oraclePrice > 0) {
       targetByTicker.set(ticker.toUpperCase(), toUsdc6(oraclePrice));

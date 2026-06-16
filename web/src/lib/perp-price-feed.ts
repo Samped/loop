@@ -16,9 +16,9 @@ function mapMode(mode: PerpMarkMode): PerpMarkPriceSource {
   return mode;
 }
 
-/** Current settlement mark from the server mark engine. */
-export async function getPerpMarkPrice(ticker: string): Promise<PerpMarkPrice | null> {
-  const snap = await getPerpMarkSnapshot(ticker);
+/** Current settlement mark from the server mark engine (read-only). */
+export function getPerpMarkPrice(ticker: string): PerpMarkPrice | null {
+  const snap = getPerpMarkSnapshot(ticker);
   if (!snap) return null;
 
   return {

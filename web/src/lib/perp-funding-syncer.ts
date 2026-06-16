@@ -1,7 +1,7 @@
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "@/lib/arc-chain";
-import { getOraclePrivateKey } from "@/lib/config";
+import { getOraclePrivateKey } from "@/lib/config-secrets";
 import { perpEngineAbi } from "@/lib/contracts/perp-engine";
 import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
 

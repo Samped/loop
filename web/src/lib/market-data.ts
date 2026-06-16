@@ -9,6 +9,7 @@ import {
   getKlines,
   getMarketSnapshot,
   getSectors,
+  normalizeKline,
 } from "@/lib/sosovalue";
 
 const STOCKS_TTL_MS = 15 * 60 * 1000;
@@ -64,5 +65,5 @@ export async function getCachedKlines(ticker: string, limit: number): Promise<{ 
     const { setStoredKlines } = await import("@/lib/snapshot-store");
     setStoredKlines(upper, data);
   }
-  return { klines: data, stale };
+  return { klines: data.map(normalizeKline), stale };
 }
