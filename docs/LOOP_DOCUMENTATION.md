@@ -1,74 +1,55 @@
-# Loop — Product & Technical Documentation
+# Loop
 
-**Version:** 1.0  
-**Last updated:** June 2026  
-**Live app:** [https://loopfiapp.xyz](https://loopfiapp.xyz)  
-**Repository:** [github.com/Samped/loop](https://github.com/Samped/loop)
+Loop is a trading interface for SoSoValue indexed crypto stocks on Arc Testnet. Users hold synthetic spot positions and perpetual futures with USDC settlement.
 
----
+**App:** [loopfiapp.xyz](https://loopfiapp.xyz)  
+**Source:** [github.com/Samped/loop](https://github.com/Samped/loop)
 
-## Table of contents
+Start with [What is Loop?](what-is-loop.md), [Local development](local-development.md), or the [API reference](api-reference.md).
 
-1. [What is Loop?](#1-what-is-loop)
-2. [Who is it for?](#2-who-is-it-for)
-3. [Core concepts](#3-core-concepts)
-4. [Features walkthrough](#4-features-walkthrough)
-5. [How trading works](#5-how-trading-works)
-6. [System architecture](#6-system-architecture)
-7. [Smart contracts](#7-smart-contracts)
-8. [Data sources & market intelligence](#8-data-sources--market-intelligence)
-9. [Web application](#9-web-application)
-10. [API reference](#10-api-reference)
-11. [Environment variables](#11-environment-variables)
-12. [Local development](#12-local-development)
-13. [Deployment (Vercel & custom domain)](#13-deployment-vercel--custom-domain)
-14. [Security model](#14-security-model)
-15. [Glossary](#15-glossary)
-16. [FAQ & troubleshooting](#16-faq--troubleshooting)
+Testnet only. Audit contracts before mainnet use.
 
 ---
 
-## 1. What is Loop?
+# What is Loop?
 
-**Loop** is a full-stack web application for trading **SoSoValue-indexed crypto stocks** on **Arc Testnet**. It combines live market data, news, and portfolio views with on-chain settlement in **USDC**.
+Loop connects SoSoValue market data to on-chain settlement on Arc Testnet. Users trade synthetic exposure to crypto stocks; collateral and P&L settle in USDC.
 
-Loop does **not** custody real-world equity tokens. Instead, it offers:
+Loop does not issue wrapped equity tokens or hold real-world shares. Products:
 
 | Product | Description |
 |---------|-------------|
-| **Synthetic spot** | Buy and sell synthetic shares through a USDC-collateralized vault (`StockVault.sol`). Prices follow external oracles; settlement is in USDC. |
-| **Perpetual futures** | Open leveraged long or short positions on selected tickers via `PerpEngine.sol`. Positions are cash-settled against mark prices. |
-| **Market intelligence** | Sector views, live prices, charts, and aggregated news from multiple providers. |
-| **Portfolio** | Unified view of wallet USDC, spot holdings, open perp positions, and closed trade history. |
+| Spot | Synthetic shares via `StockVault.sol`, a USDC reserved ledger priced by the on-chain oracle |
+| Perpetuals | Cash settled long/short positions on `PerpEngine.sol` against mark prices |
+| Markets | Sector views, snapshots, klines, and live price streams |
+| News | Headlines from SoSoValue, Finnhub, CryptoPanic, and RSS |
+| Portfolio | Wallet USDC, spot holdings, perp positions, and closed trade history |
 
-The app is built for **testnet experimentation**. Contracts, keys, and operational flows should be audited before any mainnet use.
-
----
-
-## 2. Who is it for?
-
-- **Traders and builders** exploring synthetic equity exposure on a USDC-native chain.
-- **Developers** who want a reference implementation of oracle-driven spot vaults and perp engines with a modern Next.js frontend.
-- **Teams** evaluating Arc Testnet for DeFi applications that settle in USDC.
-
-You need a Web3 wallet (e.g. MetaMask), Arc Testnet configured, and testnet USDC from the [Circle Faucet](https://faucet.circle.com).
+The current deployment targets Arc Testnet. Operational keys and contracts require a full audit before production use on mainnet.
 
 ---
 
-## 3. Core concepts
+# Who is it for?
 
-### Crypto stocks (SoSoValue index)
+Loop serves traders who want synthetic equity exposure on a USDC native chain, developers integrating oracle priced vaults and perp engines, and teams evaluating Arc Testnet for DeFi settlement.
 
-Loop lists instruments that track companies commonly held in crypto treasury or mining portfolios (e.g. MSTR, COIN, MARA). **SoSoValue** provides the index catalog, snapshots, klines, and reference prices. The app can list **100+ tickers** when `SOSOVALUE_API_KEY` is configured.
+Requirements: an EIP-1193 wallet (e.g. MetaMask), Arc Testnet configured, and testnet USDC from the [Circle Faucet](https://faucet.circle.com).
 
-### Synthetic vs tokenized equity
+---
 
-Loop uses **synthetic, cash-settled** exposure:
+# Core concepts
 
-- **Spot:** The vault holds USDC reserves. When you buy, USDC is locked and you receive ledger shares at the oracle price. When you sell, shares are burned and USDC is returned.
-- **Perps:** You post USDC margin. P&L is computed against mark prices; no shares change hands on-chain.
+### Crypto stocks
 
-This is **not** wrapped stock tokens or direct equity ownership.
+Loop lists instruments from the SoSoValue crypto stock index: companies commonly held in crypto treasury or mining portfolios (MSTR, COIN, MARA, and others). SoSoValue supplies the catalog, snapshots, klines, and reference prices. With `SOSOVALUE_API_KEY` configured, the app lists 100+ tickers.
+
+### Synthetic settlement
+
+Spot: the vault holds USDC reserves. A buy locks USDC and credits ledger shares at the oracle price. A sell burns shares and returns USDC.
+
+Perps: the user posts USDC margin. P&L is calculated against mark prices. No share tokens move on-chain.
+
+This is not tokenized equity or direct stock ownership.
 
 ### Arc Testnet
 
@@ -78,63 +59,47 @@ This is **not** wrapped stock tokens or direct equity ownership.
 | Chain ID | `5042002` |
 | RPC | `https://rpc.testnet.arc.network` |
 | Explorer | [testnet.arcscan.app](https://testnet.arcscan.app) |
-| Gas token | USDC (native gas) |
+| Gas token | USDC |
 
 ### Oracle prices
 
-On-chain contracts read prices from a designated **oracle address**. The Loop server (using `PRIVATE_KEY`) periodically pushes SoSoValue (spot) and computed mark (perp) prices to the contracts. Users’ trades execute at the prices stored on-chain at transaction time.
+Contracts read prices from a designated oracle address. The Loop server signs price updates with `PRIVATE_KEY`, pushing SoSoValue quotes for spot and computed marks for perps. Trades execute at the on-chain price at transaction time.
 
 ---
 
-## 4. Features walkthrough
+# Features
 
-### Markets dashboard (`/`)
+### Markets (`/`)
 
-- Browse crypto stocks by sector.
-- See live or cached snapshots (price, change, volume).
-- Navigate to individual stock detail pages.
-- On cold start, the server prefetches the full catalog in parallel so the list loads in seconds on production.
+Browse crypto stocks by sector. Snapshots show price, change, and volume from cache or live feeds. The server prefetches the full catalog on cold start so production loads the complete list within seconds.
 
 ### Stock detail (`/stock/[ticker]`)
 
-- Price chart (klines from SoSoValue).
-- Company overview and key stats.
-- **Trade panel:** connect wallet, buy/sell synthetic shares via `StockVault`.
-- Ticker-specific news.
+Kline charts, company overview, a trade panel for `StockVault` buy/sell, and ticker news.
 
-### Perpetual markets (`/perp`, `/perp/[ticker]`)
+### Perpetuals (`/perp`, `/perp/[ticker]`)
 
-Supported perp tickers (configured at deploy time):
+Deployed perp markets: **MSTR, COIN, HOOD, MARA, RIOT**.
 
-**MSTR, COIN, HOOD, MARA, RIOT**
-
-- Live mark chart (server-side mark engine).
-- Open long/short with leverage up to market limits.
-- Add/remove margin, close positions.
-- Funding and liquidation follow `PerpEngine` rules.
+Mark chart, long/short entry, margin add/remove, position close. Funding and liquidation follow `PerpEngine` rules.
 
 ### Portfolio (`/portfolio`)
 
-- USDC balance on Arc.
-- Spot holdings per ticker.
-- Open perp positions with unrealized P&L.
-- Closed trade history (stored locally and optionally in Neon Postgres).
+Arc USDC balance, spot holdings, open perp positions with unrealized P&L, and closed trades (local store or Neon Postgres).
 
 ### News (`/news`, `/news/[id]`)
 
-- Headlines from SoSoValue, Finnhub, CryptoPanic, and RSS fallbacks.
-- Background sync and client polling keep the feed fresh.
-- Full article view for stored items.
+Aggregated headlines with background sync and client polling. Stored articles open in full view.
 
 ### Agent (`/agent`)
 
-- Placeholder for a future trading agent experience.
+Reserved for a future trading agent.
 
 ---
 
-## 5. How trading works
+# How trading works
 
-### Spot buy flow
+### Spot buy
 
 ```
 User wallet                    StockVault (on-chain)              Oracle / server
@@ -148,46 +113,47 @@ User wallet                    StockVault (on-chain)              Oracle / serve
      |<-- synthetic shares credited ---|                                  |
 ```
 
-1. User connects wallet and approves USDC spend.
-2. User submits `buy` with USDC amount and slippage protection.
-3. Contract uses the current oracle price to mint ledger shares.
-4. Vault must remain **solvent**: USDC balance ≥ sum of (circulating shares × price) for all tickers.
+1. User approves USDC spend.
+2. User calls `buy` with amount and slippage bounds.
+3. The contract mints ledger shares at the stored oracle price.
+4. The vault must stay solvent: USDC balance ≥ Σ(circulating shares × price) per ticker.
 
-### Spot sell flow
+### Spot sell
 
-1. User submits `sell` with share amount and minimum USDC out.
-2. Contract burns shares and transfers USDC from vault reserves.
-3. Transaction reverts if reserves are insufficient.
+1. User calls `sell` with share amount and minimum USDC out.
+2. The contract burns shares and transfers USDC from reserves.
+3. Reverts if reserves are insufficient.
 
-### Perp open flow
+### Perp open
 
-1. User selects side (long/short), size, and margin.
-2. Contract checks leverage, open interest caps, and oracle freshness.
-3. Position is stored; margin is locked in the engine.
+1. User selects side, size, and margin.
+2. The contract enforces leverage limits, open interest caps, and oracle freshness.
+3. Margin is locked; the position is recorded on-chain.
 
-### Perp close / liquidation
+### Perp close and liquidation
 
-- **Close:** User closes fully or partially; realized P&L and remaining margin are settled in USDC.
-- **Liquidation:** Third parties can liquidate under-margined positions and receive a bonus from the insurance fund.
+Close: full or partial exit. Realized P&L and remaining margin settle in USDC.
 
-### Mark price engine (perps)
+Liquidation: under-margined positions can be closed by third parties for a bonus from the insurance fund.
 
-The server runs a **mark engine** (`PERP_MARK_MODE`):
+### Mark engine
+
+`PERP_MARK_MODE` controls mark computation:
 
 | Mode | Behavior |
 |------|----------|
-| `live` (default) | Index from Finnhub + SoSoValue median; basis and microstructure model produce tradable marks. |
-| `gbm` | Demo stochastic simulator for testnet demos without live feeds. |
+| `live` | Index from Finnhub and SoSoValue median; basis model produces tradable marks |
+| `gbm` | Stochastic simulator for testnet demos without live feeds |
 
-Marks are exposed read-only via `/api/perp/mark/[ticker]` and pushed to `PerpEngine` on an interval (`PERP_ORACLE_SYNC_INTERVAL_MS`).
+Marks are read-only at `/api/perp/mark/[ticker]`. The server pushes to `PerpEngine` on `PERP_ORACLE_SYNC_INTERVAL_MS`.
 
 ---
 
-## 6. System architecture
+# System architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Loop Web Application                        │
+│                         Loop client                             │
 │              Next.js 16 · React 19 · wagmi · viem               │
 └────────────┬───────────────────────────────┬────────────────────┘
              │                               │
@@ -208,169 +174,122 @@ Marks are exposed read-only via `/api/perp/mark/[ticker]` and pushed to `PerpEng
 
 | Layer | Role |
 |-------|------|
-| **Presentation** | React pages and components; wallet connection via wagmi. |
-| **API routes** | Next.js Route Handlers for market data, perp quotes, oracle sync, news. |
-| **Services (`src/lib`)** | Caching, SoSoValue client, perp mark engine, news syncer, portfolio aggregation. |
-| **Persistence** | In-memory and file caches; optional Neon for durable perp history. |
-| **Blockchain** | viem clients with timeouts; user txs via wallet; server txs via `PRIVATE_KEY`. |
+| Client | React pages, wagmi wallet connection |
+| API | Next.js route handlers for market data, perp quotes, oracle sync, news |
+| Services | `src/lib`: caching, SoSoValue client, perp mark engine, news sync, portfolio |
+| Persistence | In-memory and file caches; optional Neon for perp history |
+| Chain | viem with RPC timeouts; user txs via wallet; server txs via `PRIVATE_KEY` |
 
-### Performance patterns
+### Stack
 
-- **Cache-first APIs** return warm data immediately; background jobs refresh caches.
-- **Neon circuit breaker** prevents database timeouts from blocking the server.
-- **Parallel market prefetch** loads the full stock catalog on cold start (~8–12s on Vercel).
-- **RPC timeouts** on Arc public RPC avoid hanging requests.
+Next.js 16 (App Router), React 19, Tailwind CSS 4, wagmi 3, viem 2, TanStack Query. Contracts in `contracts/` (Solidity 0.8.24, Foundry). App code in `web/src/` (`app/`, `components/`, `hooks/`, `lib/`).
+
+### Runtime behavior
+
+Cache-first APIs return warm data and refresh in the background. A Neon circuit breaker prevents database timeouts from blocking requests. Market cold start prefetches the full catalog in parallel (~8–12s on Vercel). Arc RPC calls use explicit timeouts.
 
 ---
 
-## 7. Smart contracts
+# Smart contracts
 
-Location: `contracts/` (Foundry)
+Source: `contracts/` (Foundry).
 
 ### StockVault.sol
 
-USDC-reserved synthetic stock ledger.
+USDC reserved synthetic stock ledger.
 
-| Concept | Detail |
-|---------|--------|
+| Field | Detail |
+|-------|--------|
 | Collateral | USDC (6 decimals) |
-| Shares | 18-decimal ledger units per ticker |
+| Shares | 18 decimal ledger units per ticker |
 | Pricing | `prices[ticker]` in USDC per share (6 decimals) |
 | Roles | `owner`, `oracle` |
-| Key ops | `buy`, `sell`, `setPrice`, `depositReserve` |
+| Operations | `buy`, `sell`, `setPrice`, `depositReserve` |
 
-Solvency invariant: vault USDC must cover all outstanding synthetic liability at oracle prices.
+Solvency: vault USDC must cover all synthetic liability at oracle prices.
 
 ### PerpEngine.sol
 
-Independent cash-settled perpetual futures.
+Cash settled perpetual futures, separate from spot.
 
-| Concept | Detail |
-|---------|--------|
+| Field | Detail |
+|-------|--------|
 | Margin | USDC |
-| Markets | Per-ticker config: leverage, maintenance margin, OI caps |
-| Funding | 8-hour intervals; cumulative funding index |
-| Liquidation | Maintenance margin breach; liquidator bonus (2.5% bps config) |
-| Oracle staleness | Max 5 minutes |
+| Markets | Per ticker leverage, maintenance margin, open interest caps |
+| Funding | 8 hour intervals, cumulative funding index |
+| Liquidation | Maintenance breach; liquidator bonus (250 bps) |
+| Oracle staleness | 5 minutes max |
 
-Deploy scripts: `contracts/script/`  
-Tests: `forge test`
+Deploy scripts: `contracts/script/`. Run tests with `forge test`.
 
-### Deploy commands
+### Deploy
 
-**Spot vault** (from `web/`):
+Spot vault (from `web/`):
 
 ```bash
 npm run deploy:vault
 ```
 
-**Perp engine** (from `contracts/`):
+Perp engine (from `contracts/`):
 
 ```bash
 forge script script/DeployPerp.s.sol --rpc-url https://rpc.testnet.arc.network --broadcast
 ```
 
-Add deployed addresses to environment variables (see Section 11).
+Record addresses in [environment variables](environment-variables.md).
 
 ---
 
-## 8. Data sources & market intelligence
+# Data sources
 
-| Provider | Used for |
-|----------|----------|
-| **SoSoValue** | Stock catalog, snapshots, klines, primary news |
-| **Finnhub** | Supplemental company news and perp index prices |
-| **CryptoPanic** | Crypto-related headlines |
-| **RSS** | Google News, CoinDesk fallbacks when API keys are absent |
+| Provider | Role |
+|----------|------|
+| SoSoValue | Stock catalog, snapshots, klines, primary news |
+| Finnhub | Company news, perp index prices |
+| CryptoPanic | Crypto headlines |
+| RSS | Google News, CoinDesk when API keys are absent |
 
-### Caching
-
-- Market snapshots and bootstrap payloads are cached server-side.
-- News is ingested on a schedule (`NEWS_SYNC_INTERVAL_MS`) and on demand.
-- Demo fallbacks apply when `SOSOVALUE_API_KEY` is missing (limited ticker set).
+Market snapshots and bootstrap payloads are cached server-side. News ingests on `NEWS_SYNC_INTERVAL_MS` and on demand. Without `SOSOVALUE_API_KEY`, the app falls back to a limited demo ticker set.
 
 ---
 
-## 9. Web application
+# API reference
 
-### Tech stack
-
-| Layer | Technologies |
-|-------|----------------|
-| Framework | Next.js 16 (App Router) |
-| UI | React 19, Tailwind CSS 4 |
-| Wallet | wagmi 3, viem 2, TanStack Query |
-| Database | Neon Postgres (optional) |
-| Tooling | TypeScript, ESLint, tsx for scripts |
-
-### Project structure
-
-```
-loop/
-├── contracts/           # Solidity + Foundry
-│   ├── src/
-│   │   ├── StockVault.sol
-│   │   └── PerpEngine.sol
-│   └── script/
-└── web/
-    ├── public/          # Logo, favicon, static assets
-    ├── scripts/         # sync-prices, sync-news, deploy helpers
-    └── src/
-        ├── app/         # Pages and API routes
-        ├── components/  # UI components
-        ├── hooks/       # Wallet, perp marks, balances
-        └── lib/         # Core business logic
-```
-
-### Key libraries (`web/src/lib`)
-
-| Module | Purpose |
-|--------|---------|
-| `sosovalue.ts` | SoSoValue API client and parallel snapshot fetch |
-| `market-cold-start.ts` | Full catalog prefetch on server boot |
-| `perp-mark-engine.ts` | Live mark computation |
-| `perp-mark-history-store.ts` | Mark history (local JSON + Neon) |
-| `news-syncer.ts` | Multi-source news ingestion |
-| `neon-guard.ts` | Circuit breaker for database calls |
-| `arc-public-client.ts` | RPC client with timeout |
-
----
-
-## 10. API reference
-
-Public read endpoints (representative list):
+### Public (read)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/market/bootstrap` | GET | Initial market payload (sectors, stocks, snapshots) |
+| `/api/market/bootstrap` | GET | Sectors, stocks, snapshots |
 | `/api/market/stocks` | GET | Stock list |
 | `/api/market/snapshots` | GET | All snapshots |
-| `/api/market/snapshot/[ticker]` | GET | Single ticker snapshot |
+| `/api/market/snapshot/[ticker]` | GET | Single snapshot |
 | `/api/market/klines/[ticker]` | GET | Chart candles |
 | `/api/market/prices/stream` | GET | SSE price stream |
-| `/api/perp/mark/[ticker]` | GET | Current perp mark (read-only) |
-| `/api/perp/quote/[ticker]` | GET | Open/close quote helpers |
+| `/api/perp/mark/[ticker]` | GET | Perp mark (read only) |
+| `/api/perp/quote/[ticker]` | GET | Open/close quotes |
 | `/api/perp/positions/[address]` | GET | On-chain perp positions |
-| `/api/portfolio/[address]` | GET | Aggregated portfolio |
+| `/api/portfolio/[address]` | GET | Portfolio aggregate |
 | `/api/news` | GET | News list |
 | `/api/news/article/[id]` | GET | Single article |
 
-Admin or rate-limited endpoints (require `x-admin-key` when `ADMIN_API_KEY` is set):
+### Admin (rate limited)
+
+Require header `x-admin-key` when `ADMIN_API_KEY` is set.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/oracle/sync-prices` | POST | Push spot oracle prices |
-| `/api/perp/sync-prices` | POST | Push perp mark prices |
-| `/api/perp/liquidate` | POST | Trigger liquidation txs |
-| `/api/news/sync` | POST | Run news ingestion |
+| `/api/perp/sync-prices` | POST | Push perp marks |
+| `/api/perp/liquidate` | POST | Liquidation transactions |
+| `/api/news/sync` | POST | News ingestion |
 
-**Nudge endpoints** (`/api/oracle/nudge`, `/api/perp/nudge`) let the UI request a sync without exposing admin keys client-side; they are rate-limited server-side.
+`/api/oracle/nudge` and `/api/perp/nudge` trigger sync from the UI without exposing admin keys. Both are rate limited.
 
 ---
 
-## 11. Environment variables
+# Environment variables
 
-Copy `web/.env.example` to `web/.env.local`. Never commit secrets.
+Copy `web/.env.example` to `web/.env.local`. Do not commit secrets.
 
 ### Market data
 
@@ -385,50 +304,46 @@ Copy `web/.env.example` to `web/.env.local`. Never commit secrets.
 | Variable | Description |
 |----------|-------------|
 | `NEXT_PUBLIC_STOCK_VAULT_ADDRESS` | Spot vault (client) |
-| `STOCK_VAULT_ADDRESS` | Spot vault (server oracle sync) |
+| `STOCK_VAULT_ADDRESS` | Spot vault (server sync) |
 | `NEXT_PUBLIC_PERP_ENGINE_ADDRESS` | Perp engine (client) |
 | `PERP_ENGINE_ADDRESS` | Perp engine (server) |
-| `PRIVATE_KEY` | Server wallet for deploy/sync only |
+| `PRIVATE_KEY` | Server wallet for deploy and oracle sync |
 
 ### Operations
 
 | Variable | Description |
 |----------|-------------|
 | `ADMIN_API_KEY` | Protects admin POST routes |
-| `ORACLE_SYNC_INTERVAL_MS` | Spot oracle auto-sync (default 60000) |
-| `NEWS_SYNC_INTERVAL_MS` | News background sync (default 600000) |
+| `ORACLE_SYNC_INTERVAL_MS` | Spot oracle sync (default 60000) |
+| `NEWS_SYNC_INTERVAL_MS` | News sync (default 600000) |
 | `NEON_DATABASE_URL` | Optional Postgres |
 | `NEON_ENABLED` | Set `0` to disable Neon locally |
+| `NEXT_PUBLIC_DOCS_URL` | GitBook URL for in-app docs link |
 
-### Perp mark tuning
-
-See `web/.env.example` for `PERP_MARK_MODE`, `PERP_INDEX_POLL_MS`, `PERP_ORACLE_SYNC_INTERVAL_MS`, and related parameters.
+Perp mark parameters (`PERP_MARK_MODE`, `PERP_INDEX_POLL_MS`, `PERP_ORACLE_SYNC_INTERVAL_MS`, and others) are documented in `web/.env.example`.
 
 ---
 
-## 12. Local development
+# Local development
 
 ### Prerequisites
 
-- Node.js 20+
-- npm
-- Foundry (for contracts)
-- Wallet with Arc Testnet + testnet USDC
+Node.js 20+, npm, Foundry (contracts), wallet on Arc Testnet with testnet USDC.
 
-### Steps
+### Setup
 
 ```bash
 git clone https://github.com/Samped/loop.git
 cd loop/web
 npm install
 cp .env.example .env.local
-# Edit .env.local with your keys and contract addresses
+# Set API keys and contract addresses in .env.local
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### Useful scripts
+### Scripts
 
 | Command | Description |
 |---------|-------------|
@@ -436,112 +351,101 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run build` | Production build |
 | `npm run sync-prices` | Push spot prices to vault |
 | `npm run sync-news` | Ingest news |
-| `npm run warm-cache` | Prewarm snapshot cache |
+| `npm run warm-cache` | Prewarm snapshots |
 | `npm run deploy:vault` | Deploy StockVault |
 
-### Wallet setup
+### Wallet
 
-1. Add Arc Testnet: Chain ID `5042002`, RPC `https://rpc.testnet.arc.network`.
-2. Get USDC from [faucet.circle.com](https://faucet.circle.com).
-3. Connect in the app header.
+1. Add Arc Testnet: chain ID `5042002`, RPC `https://rpc.testnet.arc.network`.
+2. Fund from [faucet.circle.com](https://faucet.circle.com).
+3. Connect via the app header.
 
 ---
 
-## 13. Deployment (Vercel & custom domain)
+# Deployment
 
 ### Vercel
 
-The app deploys from the `web/` directory.
+Deploy from the `web/` directory. `vercel.json` sets function timeouts.
 
-1. Link the project to Vercel (`vercel.json` configures function timeouts).
-2. Set root directory to `web` in project settings.
-3. Add all production environment variables from Section 11.
-4. Deploy; preview and production environments should both receive keys.
+1. Link the repo; set root directory to `web`.
+2. Add production environment variables (see [environment variables](environment-variables.md)).
+3. Deploy to preview and production.
 
-**Required for full market catalog on production:** `SOSOVALUE_API_KEY`, contract addresses, and optionally `NEON_DATABASE_URL`.
+Full market catalog on production requires `SOSOVALUE_API_KEY` and contract addresses. `NEON_DATABASE_URL` is optional.
 
-### Custom domain (loopfiapp.xyz)
+### Custom domain
 
-- Point apex domain **A record** to Vercel (`76.76.21.21`).
-- Use `https://loopfiapp.xyz` (apex). If `www` is not configured in DNS, avoid apex→www redirects until `www` resolves.
+Point the apex A record to Vercel (`76.76.21.21`). Production URL: `https://loopfiapp.xyz`. Avoid apex to `www` redirects until `www` DNS is configured.
 
-### Background jobs on serverless
+### Background jobs
 
-Oracle sync, news sync, and mark engine ticks are started via `instrumentation.ts` on server boot. For always-on cron in production, consider Vercel Cron hitting nudge endpoints or an external worker.
+Oracle sync, news sync, and mark engine ticks start in `instrumentation.ts` on server boot. For reliable schedules on serverless, use Vercel Cron against the nudge endpoints or an external worker.
+
+### GitBook
+
+Docs sync from the `docs/` folder via GitHub.
+
+1. Create a space at [gitbook.com](https://www.gitbook.com).
+2. Configure → GitHub Sync → install the GitBook app on `Samped/loop`.
+3. Branch `main`, **project directory `docs`**.
+4. Initial sync: GitHub → GitBook, then Publish.
+
+Optional domain: `docs.loopfiapp.xyz` (CNAME from GitBook settings). Set `NEXT_PUBLIC_DOCS_URL` in Vercel for the in-app docs link.
 
 ---
 
-## 14. Security model
+# Security
 
 | Topic | Practice |
 |-------|----------|
-| Secrets | `PRIVATE_KEY` and `ADMIN_API_KEY` only on server; never in client bundles |
-| Admin routes | Require `x-admin-key` header when `ADMIN_API_KEY` is set |
-| Perp marks | Read-only from browser; engine runs server-side |
-| Rate limits | Bootstrap, oracle sync, news sync, and nudge endpoints are rate-limited |
-| CSP | Content Security Policy in `next.config.ts` |
-| User funds | Users sign all trades with their own wallet; app does not custody keys |
+| Secrets | `PRIVATE_KEY` and `ADMIN_API_KEY` server only; never in client bundles |
+| Admin routes | `x-admin-key` header when `ADMIN_API_KEY` is set |
+| Perp marks | Read only from the client; engine runs server side |
+| Rate limits | Bootstrap, sync, and nudge endpoints |
+| CSP | Configured in `next.config.ts` |
+| User funds | Users sign their own transactions; Loop does not custody wallets |
 
-`PRIVATE_KEY` is used for **oracle price updates and operational txs**, not for user login or trading on behalf of users.
+`PRIVATE_KEY` signs oracle updates and operational transactions. It is not used for user authentication or delegated trading.
 
 ---
 
-## 15. Glossary
+# Glossary
 
 | Term | Definition |
 |------|------------|
-| **Crypto stock** | Equity instrument tracked in the SoSoValue crypto stock index |
-| **Synthetic spot** | Ledger shares in StockVault, backed by USDC reserves |
-| **Mark price** | Perp reference price used for P&L and liquidation |
-| **Index price** | External reference (e.g. median of feeds) underlying the mark |
-| **Funding** | Periodic payment between longs and shorts on perps |
-| **Oracle** | On-chain address authorized to set prices |
-| **Solvency** | Vault USDC ≥ synthetic liabilities at oracle prices |
+| Crypto stock | Instrument in the SoSoValue crypto stock index |
+| Synthetic spot | Ledger shares in StockVault, backed by USDC reserves |
+| Mark price | Perp reference for P&L and liquidation |
+| Index price | External feed underlying the mark |
+| Funding | Periodic payment between longs and shorts |
+| Oracle | On-chain address authorized to set prices |
+| Solvency | Vault USDC ≥ synthetic liabilities at oracle prices |
 
 ---
 
-## 16. FAQ & troubleshooting
+# FAQ
 
-### Only a few stocks show on production
+### Few stocks on production
 
-- Confirm `SOSOVALUE_API_KEY` is set in Vercel Production.
-- Check `/api/market/bootstrap` response: `source` should be `sosovalue`, not `demo`.
-- Cold start may take ~8–12 seconds for the full catalog.
+Check `SOSOVALUE_API_KEY` in Vercel Production. `GET /api/market/bootstrap` should return `"source": "sosovalue"`, not `"demo"`. Cold start can take 8–12 seconds for the full catalog.
 
-### Trades fail or prices look stale
+### Stale prices or failed trades
 
-- Run oracle sync: `npm run sync-prices` or POST `/api/oracle/sync-prices`.
-- Verify `STOCK_VAULT_ADDRESS` / `PERP_ENGINE_ADDRESS` and `PRIVATE_KEY` on the server.
-- Ensure oracle address on-chain matches the server wallet.
+Run `npm run sync-prices` or `POST /api/oracle/sync-prices`. Confirm `STOCK_VAULT_ADDRESS`, `PERP_ENGINE_ADDRESS`, and `PRIVATE_KEY`. The on-chain oracle address must match the server wallet.
 
 ### Database timeouts
 
-- Set `NEON_ENABLED=0` locally if Neon is unreachable.
-- Production uses a circuit breaker; mark history falls back to local JSON.
+Set `NEON_ENABLED=0` locally when Neon is unreachable. Production falls back to local JSON via the circuit breaker.
 
-### Perp page shows fewer than 5 markets
+### Fewer than five perp markets
 
-- Only **MSTR, COIN, HOOD, MARA, RIOT** are deployed on `PerpEngine`.
-- Other tickers are spot-only unless new markets are configured on-chain.
+Only MSTR, COIN, HOOD, MARA, and RIOT are configured on `PerpEngine`. Other tickers are spot only until new markets are deployed.
 
 ### News not updating
 
-- Trigger sync via admin or wait for `NEWS_SYNC_INTERVAL_MS`.
-- News page polls automatically; use Refresh if needed.
+Wait for `NEWS_SYNC_INTERVAL_MS`, trigger admin sync, or use Refresh on the news page.
 
----
+### References
 
-## Document information
-
-This document describes the Loop application as of June 2026. For the latest code-level details, see the repository README and inline source comments.
-
-**Support links**
-
-- [Arc documentation](https://docs.arc.io)
-- [SoSoValue API](https://sosovalue.gitbook.io/soso-value-api-doc)
-- [Foundry book](https://book.getfoundry.sh)
-- [Circle Faucet](https://faucet.circle.com)
-
----
-
-*Loop — Crypto stock trading on Arc Testnet.*
+[Arc docs](https://docs.arc.io) · [SoSoValue API](https://sosovalue.gitbook.io/soso-value-api-doc) · [Foundry](https://book.getfoundry.sh) · [Circle Faucet](https://faucet.circle.com)

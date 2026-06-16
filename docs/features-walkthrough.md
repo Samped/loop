@@ -1,44 +1,27 @@
-# Features walkthrough
+# Features
 
+### Markets (`/`)
 
-### Markets dashboard (`/`)
-
-- Browse crypto stocks by sector.
-- See live or cached snapshots (price, change, volume).
-- Navigate to individual stock detail pages.
-- On cold start, the server prefetches the full catalog in parallel so the list loads in seconds on production.
+Browse crypto stocks by sector. Snapshots show price, change, and volume from cache or live feeds. The server prefetches the full catalog on cold start so production loads the complete list within seconds.
 
 ### Stock detail (`/stock/[ticker]`)
 
-- Price chart (klines from SoSoValue).
-- Company overview and key stats.
-- **Trade panel:** connect wallet, buy/sell synthetic shares via `StockVault`.
-- Ticker-specific news.
+Kline charts, company overview, a trade panel for `StockVault` buy/sell, and ticker news.
 
-### Perpetual markets (`/perp`, `/perp/[ticker]`)
+### Perpetuals (`/perp`, `/perp/[ticker]`)
 
-Supported perp tickers (configured at deploy time):
+Deployed perp markets: **MSTR, COIN, HOOD, MARA, RIOT**.
 
-**MSTR, COIN, HOOD, MARA, RIOT**
-
-- Live mark chart (server-side mark engine).
-- Open long/short with leverage up to market limits.
-- Add/remove margin, close positions.
-- Funding and liquidation follow `PerpEngine` rules.
+Mark chart, long/short entry, margin add/remove, position close. Funding and liquidation follow `PerpEngine` rules.
 
 ### Portfolio (`/portfolio`)
 
-- USDC balance on Arc.
-- Spot holdings per ticker.
-- Open perp positions with unrealized P&L.
-- Closed trade history (stored locally and optionally in Neon Postgres).
+Arc USDC balance, spot holdings, open perp positions with unrealized P&L, and closed trades (local store or Neon Postgres).
 
 ### News (`/news`, `/news/[id]`)
 
-- Headlines from SoSoValue, Finnhub, CryptoPanic, and RSS fallbacks.
-- Background sync and client polling keep the feed fresh.
-- Full article view for stored items.
+Aggregated headlines with background sync and client polling. Stored articles open in full view.
 
 ### Agent (`/agent`)
 
-- Placeholder for a future trading agent experience.
+Reserved for a future trading agent.

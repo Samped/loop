@@ -1,42 +1,30 @@
-# Deployment (Vercel & custom domain)
-
+# Deployment
 
 ### Vercel
 
-The app deploys from the `web/` directory.
+Deploy from the `web/` directory. `vercel.json` sets function timeouts.
 
-1. Link the project to Vercel (`vercel.json` configures function timeouts).
-2. Set root directory to `web` in project settings.
-3. Add all production environment variables from Section 11.
-4. Deploy; preview and production environments should both receive keys.
+1. Link the repo; set root directory to `web`.
+2. Add production environment variables (see [environment variables](environment-variables.md)).
+3. Deploy to preview and production.
 
-**Required for full market catalog on production:** `SOSOVALUE_API_KEY`, contract addresses, and optionally `NEON_DATABASE_URL`.
+Full market catalog on production requires `SOSOVALUE_API_KEY` and contract addresses. `NEON_DATABASE_URL` is optional.
 
-### Custom domain (loopfiapp.xyz)
+### Custom domain
 
-- Point apex domain **A record** to Vercel (`76.76.21.21`).
-- Use `https://loopfiapp.xyz` (apex). If `www` is not configured in DNS, avoid apex→www redirects until `www` resolves.
+Point the apex A record to Vercel (`76.76.21.21`). Production URL: `https://loopfiapp.xyz`. Avoid apex to `www` redirects until `www` DNS is configured.
 
-### Background jobs on serverless
+### Background jobs
 
-Oracle sync, news sync, and mark engine ticks are started via `instrumentation.ts` on server boot. For always-on cron in production, consider Vercel Cron hitting nudge endpoints or an external worker.
+Oracle sync, news sync, and mark engine ticks start in `instrumentation.ts` on server boot. For reliable schedules on serverless, use Vercel Cron against the nudge endpoints or an external worker.
 
-### Documentation site (GitBook)
+### GitBook
 
-Loop docs are published via [GitBook](https://www.gitbook.com) (same platform used by SoSoValue and many crypto projects). Source files live in the repo `docs/` folder with Git Sync.
+Docs sync from the `docs/` folder via GitHub.
 
-**One-time setup:**
+1. Create a space at [gitbook.com](https://www.gitbook.com).
+2. Configure → GitHub Sync → install the GitBook app on `Samped/loop`.
+3. Branch `main`, **project directory `docs`**.
+4. Initial sync: GitHub → GitBook, then Publish.
 
-1. Go to [gitbook.com](https://www.gitbook.com) and sign in with GitHub.
-2. Create a new **space** (e.g. "Loop").
-3. Open **Configure** → **GitHub Sync** → install the GitBook GitHub app.
-4. Select repository **Samped/loop**, branch **main**.
-5. Set **Project directory** to `docs` (monorepo; the folder contains `.gitbook.yaml`).
-6. Choose initial sync direction: **GitHub → GitBook**.
-7. After sync, open **Publish** to get a public URL (e.g. `https://your-org.gitbook.io/loop`).
-
-**Optional custom domain:** In GitBook space settings → **Domains**, add `docs.loopfiapp.xyz` and add the CNAME record GitBook provides in Spaceship DNS.
-
-**Link from the app:** Set `NEXT_PUBLIC_DOCS_URL` in Vercel to your published GitBook URL so the sidebar "Documentation" link appears.
-
-Edits in GitBook or commits to `docs/` on `main` stay in sync both ways.
+Optional domain: `docs.loopfiapp.xyz` (CNAME from GitBook settings). Set `NEXT_PUBLIC_DOCS_URL` in Vercel for the in-app docs link.

@@ -1,9 +1,8 @@
 # System architecture
 
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Loop Web Application                        │
+│                         Loop client                             │
 │              Next.js 16 · React 19 · wagmi · viem               │
 └────────────┬───────────────────────────────┬────────────────────┘
              │                               │
@@ -24,15 +23,16 @@
 
 | Layer | Role |
 |-------|------|
-| **Presentation** | React pages and components; wallet connection via wagmi. |
-| **API routes** | Next.js Route Handlers for market data, perp quotes, oracle sync, news. |
-| **Services (`src/lib`)** | Caching, SoSoValue client, perp mark engine, news syncer, portfolio aggregation. |
-| **Persistence** | In-memory and file caches; optional Neon for durable perp history. |
-| **Blockchain** | viem clients with timeouts; user txs via wallet; server txs via `PRIVATE_KEY`. |
+| Client | React pages, wagmi wallet connection |
+| API | Next.js route handlers for market data, perp quotes, oracle sync, news |
+| Services | `src/lib`: caching, SoSoValue client, perp mark engine, news sync, portfolio |
+| Persistence | In-memory and file caches; optional Neon for perp history |
+| Chain | viem with RPC timeouts; user txs via wallet; server txs via `PRIVATE_KEY` |
 
-### Performance patterns
+### Stack
 
-- **Cache-first APIs** return warm data immediately; background jobs refresh caches.
-- **Neon circuit breaker** prevents database timeouts from blocking the server.
-- **Parallel market prefetch** loads the full stock catalog on cold start (~8–12s on Vercel).
-- **RPC timeouts** on Arc public RPC avoid hanging requests.
+Next.js 16 (App Router), React 19, Tailwind CSS 4, wagmi 3, viem 2, TanStack Query. Contracts in `contracts/` (Solidity 0.8.24, Foundry). App code in `web/src/` (`app/`, `components/`, `hooks/`, `lib/`).
+
+### Runtime behavior
+
+Cache-first APIs return warm data and refresh in the background. A Neon circuit breaker prevents database timeouts from blocking requests. Market cold start prefetches the full catalog in parallel (~8–12s on Vercel). Arc RPC calls use explicit timeouts.

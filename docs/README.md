@@ -1,20 +1,10 @@
-# Loop Documentation
+# Loop
 
-Welcome to the official documentation for **Loop** — crypto stock trading on Arc Testnet.
+Loop is a trading interface for SoSoValue indexed crypto stocks on Arc Testnet. Users hold synthetic spot positions and perpetual futures with USDC settlement.
 
-**Live app:** [loopfiapp.xyz](https://loopfiapp.xyz)  
-**Repository:** [github.com/Samped/loop](https://github.com/Samped/loop)
+**App:** [loopfiapp.xyz](https://loopfiapp.xyz)  
+**Source:** [github.com/Samped/loop](https://github.com/Samped/loop)
 
-Loop lets you trade synthetic spot positions and perpetual futures on SoSoValue-indexed crypto stocks, with USDC settlement on Arc Testnet.
+Start with [What is Loop?](what-is-loop.md), [Local development](local-development.md), or the [API reference](api-reference.md).
 
-## Quick links
-
-* [What is Loop?](what-is-loop.md)
-* [Local development](local-development.md)
-* [Deployment](deployment-vercel-custom-domain.md)
-* [API reference](api-reference.md)
-* [FAQ](faq-troubleshooting.md)
-
----
-
-*Version 1.0 · June 2026 · Testnet only*
+Testnet only. Audit contracts before mainnet use.

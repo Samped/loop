@@ -1,13 +1,12 @@
-# Security model
-
+# Security
 
 | Topic | Practice |
 |-------|----------|
-| Secrets | `PRIVATE_KEY` and `ADMIN_API_KEY` only on server; never in client bundles |
-| Admin routes | Require `x-admin-key` header when `ADMIN_API_KEY` is set |
-| Perp marks | Read-only from browser; engine runs server-side |
-| Rate limits | Bootstrap, oracle sync, news sync, and nudge endpoints are rate-limited |
-| CSP | Content Security Policy in `next.config.ts` |
-| User funds | Users sign all trades with their own wallet; app does not custody keys |
+| Secrets | `PRIVATE_KEY` and `ADMIN_API_KEY` server only; never in client bundles |
+| Admin routes | `x-admin-key` header when `ADMIN_API_KEY` is set |
+| Perp marks | Read only from the client; engine runs server side |
+| Rate limits | Bootstrap, sync, and nudge endpoints |
+| CSP | Configured in `next.config.ts` |
+| User funds | Users sign their own transactions; Loop does not custody wallets |
 
-`PRIVATE_KEY` is used for **oracle price updates and operational txs**, not for user login or trading on behalf of users.
+`PRIVATE_KEY` signs oracle updates and operational transactions. It is not used for user authentication or delegated trading.

@@ -1,18 +1,16 @@
 # Core concepts
 
+### Crypto stocks
 
-### Crypto stocks (SoSoValue index)
+Loop lists instruments from the SoSoValue crypto stock index: companies commonly held in crypto treasury or mining portfolios (MSTR, COIN, MARA, and others). SoSoValue supplies the catalog, snapshots, klines, and reference prices. With `SOSOVALUE_API_KEY` configured, the app lists 100+ tickers.
 
-Loop lists instruments that track companies commonly held in crypto treasury or mining portfolios (e.g. MSTR, COIN, MARA). **SoSoValue** provides the index catalog, snapshots, klines, and reference prices. The app can list **100+ tickers** when `SOSOVALUE_API_KEY` is configured.
+### Synthetic settlement
 
-### Synthetic vs tokenized equity
+Spot: the vault holds USDC reserves. A buy locks USDC and credits ledger shares at the oracle price. A sell burns shares and returns USDC.
 
-Loop uses **synthetic, cash-settled** exposure:
+Perps: the user posts USDC margin. P&L is calculated against mark prices. No share tokens move on-chain.
 
-- **Spot:** The vault holds USDC reserves. When you buy, USDC is locked and you receive ledger shares at the oracle price. When you sell, shares are burned and USDC is returned.
-- **Perps:** You post USDC margin. P&L is computed against mark prices; no shares change hands on-chain.
-
-This is **not** wrapped stock tokens or direct equity ownership.
+This is not tokenized equity or direct stock ownership.
 
 ### Arc Testnet
 
@@ -22,8 +20,8 @@ This is **not** wrapped stock tokens or direct equity ownership.
 | Chain ID | `5042002` |
 | RPC | `https://rpc.testnet.arc.network` |
 | Explorer | [testnet.arcscan.app](https://testnet.arcscan.app) |
-| Gas token | USDC (native gas) |
+| Gas token | USDC |
 
 ### Oracle prices
 
-On-chain contracts read prices from a designated **oracle address**. The Loop server (using `PRIVATE_KEY`) periodically pushes SoSoValue (spot) and computed mark (perp) prices to the contracts. Users’ trades execute at the prices stored on-chain at transaction time.
+Contracts read prices from a designated oracle address. The Loop server signs price updates with `PRIVATE_KEY`, pushing SoSoValue quotes for spot and computed marks for perps. Trades execute at the on-chain price at transaction time.

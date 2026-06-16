@@ -1,8 +1,5 @@
 # Who is it for?
 
+Loop serves traders who want synthetic equity exposure on a USDC native chain, developers integrating oracle priced vaults and perp engines, and teams evaluating Arc Testnet for DeFi settlement.
 
-- **Traders and builders** exploring synthetic equity exposure on a USDC-native chain.
-- **Developers** who want a reference implementation of oracle-driven spot vaults and perp engines with a modern Next.js frontend.
-- **Teams** evaluating Arc Testnet for DeFi applications that settle in USDC.
-
-You need a Web3 wallet (e.g. MetaMask), Arc Testnet configured, and testnet USDC from the [Circle Faucet](https://faucet.circle.com).
+Requirements: an EIP-1193 wallet (e.g. MetaMask), Arc Testnet configured, and testnet USDC from the [Circle Faucet](https://faucet.circle.com).
