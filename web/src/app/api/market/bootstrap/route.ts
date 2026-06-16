@@ -10,6 +10,7 @@ import {
 import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import {
   getMarketCacheAgeMs,
+  getStoredSectors,
   getStoredSnapshots,
   getStoredStocks,
   hasBundledMarketCatalog,
