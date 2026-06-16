@@ -64,20 +64,22 @@ export function buildCandlesFromStored(
   if (stored.length === 0 && liveTicks.length === 0) return [];
 
   const bucketMs = BUCKET_MS[range];
+  const fromStored = aggregateBars(stored, bucketMs);
+  const tickCandles = buildCandles(liveTicks, range);
 
   if (isStoredRange(range)) {
-    return aggregateBars(stored, bucketMs);
+    return fromStored;
   }
 
-  if (range === "4H") {
-    const tickCandles = buildCandles(liveTicks, range);
-    if (tickCandles.length >= 8) return tickCandles;
-    const fromStored = aggregateBars(stored, bucketMs);
-    if (fromStored.length === 0) return tickCandles;
-    return mergeCandleSeries(fromStored, tickCandles);
-  }
+  // For intraday ranges, always seed from persisted bars so restart does not blank the chart.
+  // Then overlay high-frequency live ticks when they are available.
+  if (fromStored.length === 0) return tickCandles;
+  if (tickCandles.length === 0) return fromStored;
 
-  return buildCandles(liveTicks, range);
+  const merged = mergeCandleSeries(fromStored, tickCandles);
+  // If we don't yet have enough tick density after restart, prefer persisted continuity.
+  if (tickCandles.length < 12) return fromStored;
+  return merged;
 }
 
 export function barsAsTickSeries(bars: StoredMarkBar[]): MarkTick[] {

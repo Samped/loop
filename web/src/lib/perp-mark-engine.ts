@@ -7,6 +7,8 @@ import {
   getPerpMaxBasisFraction,
   getPerpBasisJumpProb,
   getPerpIndexTwapTicks,
+  getPerpVirtualBookImpactStrength,
+  getPerpVirtualBookMaxSpreadBps,
 } from "@/lib/perp-mark-config";
 import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
 import { isUsRegularSessionOpen } from "@/lib/us-market-hours";
@@ -33,6 +35,8 @@ export type PerpMarkSnapshot = {
   annualVol: number;
   marketOpen: boolean;
   sourceCount: number;
+  virtualSpreadBps?: number;
+  virtualImbalance?: number;
 };
 
 type TickerState = {
@@ -48,6 +52,13 @@ type TickerState = {
   momentumTicks: number;
   sourceCount: number;
   marketOpen: boolean;
+  virtualSpreadBps: number;
+  virtualImbalance: number;
+  impactBias: number;
+  depthScore: number;
+  regimeUntilMs: number;
+  regimeVolMult: number;
+  regimeImpactMult: number;
   history: { price: number; at: number }[];
 };
 
@@ -56,7 +67,6 @@ const LIVE_CHECK_MS = 30_000;
 const LIVE_QUOTE_MAX_AGE_MS = 120_000;
 /** ~6h of ticks at 2.5s poll — enough for intraday perp chart. */
 const HISTORY_MAX = 8_640;
-const MIN_ADVANCE_GAP_MS = 250;
 
 const states = new Map<string, TickerState>();
 
@@ -95,6 +105,38 @@ function gaussianSample(): number {
   const u1 = uniform01() || 1e-12;
   const u2 = uniform01();
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function updateVirtualBookState(state: TickerState, now: number, dtSeconds: number) {
+  if (now >= state.regimeUntilMs) {
+    state.regimeUntilMs = now + (45_000 + Math.floor(uniform01() * 135_000));
+    state.regimeVolMult = 0.75 + uniform01() * 1.5;
+    state.regimeImpactMult = 0.6 + uniform01() * 1.2;
+  }
+
+  // Latent depth varies over time: thinner book -> bigger impact and spread.
+  const depthShock = gaussianSample() * 0.08 * Math.sqrt(Math.max(0.2, dtSeconds));
+  state.depthScore = clamp(state.depthScore + depthShock, 0.25, 1.6);
+
+  // Hidden order-flow imbalance random-walks with mild pull-to-zero.
+  const imbalanceShock = gaussianSample() * 0.32 * Math.sqrt(Math.max(0.2, dtSeconds));
+  const reversion = -state.virtualImbalance * 0.08 * Math.max(0.1, dtSeconds);
+  state.virtualImbalance = clamp(state.virtualImbalance + imbalanceShock + reversion, -1.6, 1.6);
+
+  // Short-memory impact bias (like transient toxic flow pressure).
+  const impactPush =
+    state.virtualImbalance * 0.0022 * getPerpVirtualBookImpactStrength() * state.regimeImpactMult;
+  state.impactBias = clamp(state.impactBias * 0.82 + impactPush + gaussianSample() * 0.0005, -0.02, 0.02);
+
+  const baseSpread = getPerpVirtualBookMaxSpreadBps();
+  const depthPenalty = (1 / state.depthScore - 0.65) * 16;
+  const imbalancePenalty = Math.abs(state.virtualImbalance) * 4.2;
+  const jitter = gaussianSample() * 0.9;
+  state.virtualSpreadBps = clamp(baseSpread + depthPenalty + imbalancePenalty + jitter, 4, 90);
 }
 
 function rollMomentum(state: TickerState) {
@@ -179,7 +221,7 @@ function basisDiffusionStep(state: TickerState, index: number, dtSeconds: number
   );
 
   const dtYear = dtSeconds / (365.25 * 24 * 3600);
-  const sigma = state.currentVol * Math.sqrt(dtYear);
+  const sigma = state.currentVol * state.regimeVolMult * Math.sqrt(dtYear);
   const kappa = 32 * (0.7 + uniform01() * 0.65);
   const z = gaussianSample();
 
@@ -191,13 +233,17 @@ function basisDiffusionStep(state: TickerState, index: number, dtSeconds: number
 
   const logMark = Math.log(mark);
   const logIndex = Math.log(index);
-  const nextLog = logMark + -kappa * (logMark - logIndex) * dtYear + sigma * z + jump;
+  const impactTerm = state.impactBias * Math.max(0.2, dtSeconds);
+  const nextLog = logMark + -kappa * (logMark - logIndex) * dtYear + sigma * z + jump + impactTerm;
   const next = Math.exp(nextLog);
 
   const maxBasis = getPerpMaxBasisFraction();
   const floor = index * (1 - maxBasis);
   const cap = index * (1 + maxBasis);
-  return Math.min(cap, Math.max(floor, next));
+  const halfSpread = (state.virtualSpreadBps / 10_000) * 0.5;
+  const takerSign = uniform01() < 0.5 ? -1 : 1;
+  const withSpread = next * (1 + takerSign * halfSpread);
+  return Math.min(cap, Math.max(floor, withSpread));
 }
 
 async function fetchAnchorPrice(ticker: string): Promise<number | null> {
@@ -253,6 +299,13 @@ function getOrInitState(ticker: string, seedPrice?: number): TickerState | null 
     momentumTicks: 0,
     sourceCount: 0,
     marketOpen: false,
+    virtualSpreadBps: 8 + uniform01() * 10,
+    virtualImbalance: (uniform01() - 0.5) * 0.4,
+    impactBias: 0,
+    depthScore: 0.9 + uniform01() * 0.5,
+    regimeUntilMs: now + 45_000 + Math.floor(uniform01() * 120_000),
+    regimeVolMult: 0.85 + uniform01() * 1.2,
+    regimeImpactMult: 0.8 + uniform01() * 0.8,
     history:
       restored.length > 0
         ? restored.map((t) => ({ price: t.p, at: t.t }))
@@ -274,6 +327,8 @@ function toSnapshot(ticker: string, state: TickerState): PerpMarkSnapshot {
     annualVol: state.currentVol,
     marketOpen: state.marketOpen,
     sourceCount: state.sourceCount,
+    virtualSpreadBps: state.virtualSpreadBps,
+    virtualImbalance: state.virtualImbalance,
   };
 }
 
@@ -312,6 +367,7 @@ async function advanceLiveIndexMark(
     state.mark = state.mark * (1 - pull) + index.price * pull;
   }
 
+  updateVirtualBookState(state, now, dtSeconds);
   state.mark = basisDiffusionStep(state, index.price, dtSeconds);
   pushHistory(state, state.mark, now, upper);
   state.mode = sessionOpen ? "live" : "closed";
@@ -382,12 +438,9 @@ export async function advancePerpMark(ticker: string): Promise<PerpMarkSnapshot 
   return toSnapshot(upper, state);
 }
 
-export async function getPerpMarkSnapshot(ticker: string): Promise<PerpMarkSnapshot | null> {
-  const cached = readPerpMarkSnapshot(ticker);
-  if (cached && Date.now() - cached.updatedAt < MIN_ADVANCE_GAP_MS) {
-    return cached;
-  }
-  return advancePerpMark(ticker);
+/** Cached mark for HTTP reads — never advances simulation state. */
+export function getPerpMarkSnapshot(ticker: string): PerpMarkSnapshot | null {
+  return readPerpMarkSnapshot(ticker);
 }
 
 export async function getPerpOracleMark(ticker: string): Promise<number | null> {

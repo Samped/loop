@@ -6,7 +6,7 @@ export function getPerpMarkEngineMode(): "live" | "gbm" {
 
 export function getPerpMarkTickMs(): number {
   return getPerpMarkEngineMode() === "live"
-    ? Number(process.env.PERP_INDEX_POLL_MS) || 2_500
+    ? Number(process.env.PERP_INDEX_POLL_MS) || 400
     : Number(process.env.PERP_MARK_TICK_MS) || 1_000;
 }
 
@@ -31,4 +31,16 @@ export function getPerpMaxBasisFraction(): number {
 export function getPerpBasisJumpProb(): number {
   const n = Number(process.env.PERP_BASIS_JUMP_PROB);
   return Number.isFinite(n) && n >= 0 ? n : 0.01;
+}
+
+/** Max synthetic spread (in bps) used by virtual order-book microstructure. */
+export function getPerpVirtualBookMaxSpreadBps(): number {
+  const n = Number(process.env.PERP_VOB_MAX_SPREAD_BPS);
+  return Number.isFinite(n) && n > 0 ? n : 28;
+}
+
+/** How strongly order-book imbalance shifts the next mark (higher = less predictable). */
+export function getPerpVirtualBookImpactStrength(): number {
+  const n = Number(process.env.PERP_VOB_IMPACT_STRENGTH);
+  return Number.isFinite(n) && n > 0 ? n : 1.4;
 }

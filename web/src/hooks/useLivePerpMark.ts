@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const POLL_MS = 1_500;
+const POLL_MS = 300;
 
 export type LivePerpMark = {
   livePrice: number | null;
@@ -12,6 +12,7 @@ export type LivePerpMark = {
   simulated: boolean;
   marketOpen: boolean;
   sourceCount: number;
+  updatedAt: number | null;
 };
 
 /**
@@ -28,6 +29,7 @@ export function useLivePerpMark(ticker: string, fallbackBase?: number): LivePerp
     simulated: false,
     marketOpen: true,
     sourceCount: 0,
+    updatedAt: null,
   });
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function useLivePerpMark(ticker: string, fallbackBase?: number): LivePerp
           mode?: "live" | "gbm" | "closed" | "frozen";
           marketOpen?: boolean;
           sourceCount?: number;
+          updatedAt?: number;
         };
         if (typeof data.price !== "number" || data.price <= 0) return;
         if (cancelled) return;
@@ -56,19 +59,17 @@ export function useLivePerpMark(ticker: string, fallbackBase?: number): LivePerp
           simulated: data.mode === "gbm",
           marketOpen: data.marketOpen !== false,
           sourceCount: typeof data.sourceCount === "number" ? data.sourceCount : 0,
+          updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : Date.now(),
         });
       } catch {
         // keep last mark
       }
     };
 
-    const id = window.setTimeout(() => {
-      void poll();
-    }, 0);
+    void poll();
     const interval = setInterval(() => void poll(), POLL_MS);
     return () => {
       cancelled = true;
-      clearTimeout(id);
       clearInterval(interval);
     };
   }, [upper]);

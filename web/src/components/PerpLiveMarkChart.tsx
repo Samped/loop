@@ -122,7 +122,7 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
     };
 
     void fetchChart();
-    const pollMs = range === "1M" || range === "3M" ? 10_000 : 2_000;
+    const pollMs = range === "1M" || range === "3M" ? 5_000 : 400;
     const id = setInterval(() => void fetchChart(), pollMs);
     return () => {
       cancelled = true;

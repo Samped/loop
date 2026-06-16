@@ -1,6 +1,6 @@
 import { getPerpMarkTickMs } from "@/lib/perp-mark-config";
 
-const STARTUP_DELAY_MS = 1_500;
+const STARTUP_DELAY_MS = 0;
 
 let started = false;
 
