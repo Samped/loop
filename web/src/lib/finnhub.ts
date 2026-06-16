@@ -12,6 +12,17 @@ export type FinnhubNewsArticle = {
   url: string;
 };
 
+export type FinnhubQuote = {
+  c: number;
+  d: number;
+  dp: number;
+  h: number;
+  l: number;
+  o: number;
+  pc: number;
+  t: number;
+};
+
 function getApiKey(): string {
   const key = process.env.FINNHUB_API_KEY;
   if (!key) throw new Error("FINNHUB_API_KEY is not configured");
@@ -25,6 +36,22 @@ export function finnhubDateRange(days = 7): { from: string; to: string } {
     from: from.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10),
   };
+}
+
+export async function getFinnhubQuote(ticker: string): Promise<FinnhubQuote | null> {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key) return null;
+
+  const symbol = ticker.toUpperCase();
+  const url = `${BASE_URL}/quote?symbol=${symbol}&token=${key}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as FinnhubQuote | { error?: string };
+  if (!json || typeof json !== "object" || "error" in json || !("c" in json) || json.c <= 0) {
+    return null;
+  }
+  return json;
 }
 
 export async function getFinnhubCompanyNews(

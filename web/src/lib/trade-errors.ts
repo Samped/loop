@@ -40,8 +40,48 @@ export function formatTradeError(err: unknown): string {
     return "On-chain price not set yet — auto-sync should update it shortly.";
   }
 
+  if (lower.includes("insufficientmargin") || lower.includes("0x41c092a9")) {
+    return "Insufficient margin for this size at the on-chain mark — lower leverage or add margin.";
+  }
+
+  if (lower.includes("excessiveleverage") || lower.includes("0xa025ec2f")) {
+    return "Position size exceeds max leverage for this market at the on-chain mark.";
+  }
+
+  if (lower.includes("positionexists") || lower.includes("0x709cb07e")) {
+    return "You already have an open position in this market — close it first.";
+  }
+
+  if (lower.includes("staleoracle") || lower.includes("0x88cce429")) {
+    return "Oracle mark is stale (>5 min) — wait for price sync, then retry.";
+  }
+
+  if (lower.includes("marketnotactive") || lower.includes("0xb521771a")) {
+    return "This perp market is not active on-chain.";
+  }
+
+  if (lower.includes("openinterestexceeded") || lower.includes("0x377c8e4c")) {
+    return "Market open interest limit reached — try a smaller size.";
+  }
+
   if (lower.includes("insufficientshares") || lower.includes("0x39996567")) {
     return "You do not hold enough shares to sell on this vault.";
+  }
+
+  if (
+    lower.includes("nonce too low") ||
+    lower.includes("nonce has already been used") ||
+    lower.includes("nonce_expired")
+  ) {
+    return "Wallet nonce out of sync — wait a few seconds, then try once (do not double-click).";
+  }
+
+  if (
+    lower.includes("replacement fee too low") ||
+    lower.includes("replacement transaction underpriced") ||
+    lower.includes("replacement_underpriced")
+  ) {
+    return "A previous transaction is still pending — wait ~30s for it to confirm, then try again once.";
   }
 
   return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
