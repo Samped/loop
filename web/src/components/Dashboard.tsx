@@ -25,8 +25,12 @@ export function Dashboard() {
 
   const loadMarketData = useCallback(async () => {
     setLoading(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
     try {
-      const bootstrapRes = await fetch("/api/market/bootstrap").then((r) => r.json());
+      const res = await fetch("/api/market/bootstrap", { signal: controller.signal });
+      if (!res.ok) return;
+      const bootstrapRes = await res.json();
 
       const allStocks: CryptoStock[] = bootstrapRes.allStocks ?? bootstrapRes.stocks ?? [];
       const initialListed: CryptoStock[] = bootstrapRes.stocks ?? [];
@@ -39,7 +43,10 @@ export function Dashboard() {
       setSnapshots(bootstrapRes.snapshots ?? {});
       setPriceTotal(bootstrapRes.priceTotal ?? allStocks.length);
       setPricesRefreshing(bootstrapRes.pricesRefreshing === true);
+    } catch {
+      // Show UI with empty/demo state rather than infinite spinner
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   }, []);
