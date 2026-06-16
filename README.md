@@ -253,6 +253,16 @@ This software is provided for **testnet use**. Audit contracts and operational k
 
 See repository license files. Third party dependencies retain their respective licenses.
 
+## Documentation
+
+Full product and technical guide (architecture, trading flows, API, deployment, security):
+
+* **GitBook** (recommended public docs) — connect the `docs/` folder via [GitHub Sync](https://gitbook.com/docs/getting-started/git-sync/enabling-github-sync); set Project directory to `docs`
+* [docs/LOOP_DOCUMENTATION.md](docs/LOOP_DOCUMENTATION.md) — single-file Markdown export
+* [docs/LOOP_Documentation.pdf](docs/LOOP_Documentation.pdf) — PDF
+
+After publishing on GitBook, set `NEXT_PUBLIC_DOCS_URL` in Vercel to show a Documentation link in the app menu.
+
 ## Links
 
 * [Arc documentation](https://docs.arc.io)
