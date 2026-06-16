@@ -12,7 +12,11 @@ Full market catalog on production requires `SOSOVALUE_API_KEY` and contract addr
 
 ### Custom domain
 
-Point the apex A record to Vercel (`76.76.21.21`). Production URL: `https://loopfiapp.xyz`. Avoid apex to `www` redirects until `www` DNS is configured.
+Point the apex A record to Vercel (`76.76.21.21`). Production URL: `https://loopfiapp.xyz`.
+
+Do not point the apex domain at GitBook or another host. That will take down the app. Use `loopfiapp.xyz/docs` for documentation on the same Vercel deployment, or a subdomain like `docs.loopfiapp.xyz` if you host docs elsewhere.
+
+Avoid apex to `www` redirects until `www` DNS is configured.
 
 ### Background jobs
 
