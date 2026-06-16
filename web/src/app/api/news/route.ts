@@ -3,10 +3,11 @@ import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import type { NewsItem } from "@/lib/news";
 import { mixNewsFeed, storedToNewsItem } from "@/lib/news";
 import { getProviderCounts, getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
-import { getNewsSyncStatus, requestNewsSync, startNewsSyncer } from "@/lib/news-syncer";
+import { getNewsSyncStatus, requestNewsSync, startNewsSyncer, syncNewsNow } from "@/lib/news-syncer";
 import { getStoredKlines, getStoredSnapshots, getStoredSectors, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { filterListedSnapshots } from "@/lib/stock-ready";
 import { rateLimit } from "@/lib/api-guard";
+import { withTimeout } from "@/lib/async-timeout";
 
 function formatPct(value: number) {
   const pct = value * 100;
@@ -96,13 +97,18 @@ export async function GET(req: Request) {
   const force = new URL(req.url).searchParams.get("refresh") === "1";
   requestNewsSync({ force, tickerSearch: false });
 
+  const hasNewsKeys = Boolean(
+    process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,
+  );
+
+  if (hasNewsKeys && getStoredNewsArticles(1).length === 0) {
+    await withTimeout(syncNewsNow({ tickerSearch: false }), 18_000);
+  }
+
   const stored = getStoredNewsArticles(500)
     .map(storedToNewsItem)
     .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
 
-  const hasNewsKeys = Boolean(
-    process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,
-  );
   const synthetic = !hasNewsKeys && stored.length === 0 ? await buildSyntheticNews() : [];
   const items = mixNewsFeed([...stored, ...synthetic], 300);
   const status = getNewsSyncStatus();
