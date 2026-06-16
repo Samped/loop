@@ -32,6 +32,7 @@ import {
   parsePerpSide,
 } from "@/lib/perp";
 import { formatTradeError } from "@/lib/trade-errors";
+import { recordClosedTradeClient } from "@/lib/record-closed-trade";
 import { refreshAllBalances } from "@/lib/balance-refresh";
 
 const LEVERAGE_OPTIONS = [2, 3, 5, 10, 15, 20];
@@ -318,10 +319,10 @@ export function PerpPanel({
     if (!liveLiquidatable && !livePastLiq) return;
 
     const nudge = () => {
-      fetch("/api/perp/liquidate", {
+      fetch("/api/perp/nudge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: [ticker] }),
+        body: JSON.stringify({ ticker }),
       }).catch(() => {});
     };
 
@@ -511,6 +512,16 @@ export function PerpPanel({
     setTrading(true);
     userClosingRef.current = true;
     setStatus("Closing position…");
+    const closeSnapshot =
+      position && (position.side === "long" || position.side === "short")
+        ? {
+            side: position.side,
+            size: Number(position.size) / 1e18,
+            entryPrice: Number(position.entryPrice) / 1e6,
+            exitPrice: Number(tradePriceUsdc6) / 1e6,
+            pnlUsd: Number(livePnlUsdc6) / 1e6,
+          }
+        : null;
     try {
       await waitForWalletTxSlot(publicClient, address);
       await refetchMarket();
@@ -532,6 +543,19 @@ export function PerpPanel({
       setStatus("Confirming close on Arc…");
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error("Close position transaction failed");
+      if (closeSnapshot && address) {
+        recordClosedTradeClient({
+          address,
+          tradeType: "perp",
+          ticker,
+          side: closeSnapshot.side,
+          size: closeSnapshot.size,
+          entryPrice: closeSnapshot.entryPrice,
+          exitPrice: closeSnapshot.exitPrice,
+          pnlUsd: closeSnapshot.pnlUsd,
+          txHash: hash,
+        });
+      }
       await finalizeTrade("Position closed · USDC returned to wallet");
     } catch (err) {
       resetWrite();
