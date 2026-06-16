@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { WalletButton } from "@/components/WalletButton";
+import { useAutoRefreshBalances } from "@/hooks/useAutoRefreshBalances";
 
 const NAV = [
   {
@@ -14,6 +15,16 @@ const NAV = [
     icon: (
       <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v18h18M7 16l4-4 4 4 6-8" />
+      </svg>
+    ),
+  },
+  {
+    href: "/perp",
+    label: "Perps",
+    desc: "Leveraged futures",
+    icon: (
+      <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
       </svg>
     ),
   },
@@ -93,11 +104,13 @@ function NavItem({
 export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  useAutoRefreshBalances();
 
   const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
-    close();
+    const id = setTimeout(close, 0);
+    return () => clearTimeout(id);
   }, [pathname, close]);
 
   useEffect(() => {
@@ -115,7 +128,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/" || pathname.startsWith("/stock/");
-    if (href === "/news") return pathname === "/news" || pathname.startsWith("/news/");
+    if (href === "/perp") return pathname === "/perp" || pathname.startsWith("/perp/");
     return pathname.startsWith(href);
   };
 

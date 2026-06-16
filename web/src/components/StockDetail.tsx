@@ -56,11 +56,14 @@ export function StockDetail({ ticker }: { ticker: string }) {
   }, [upper]);
 
   useEffect(() => {
-    setNewsLoading(true);
-    fetch(`/api/news/stock/${upper}`)
-      .then((r) => r.json())
-      .then((data) => setNews(data.items ?? []))
-      .finally(() => setNewsLoading(false));
+    const id = setTimeout(() => {
+      setNewsLoading(true);
+      fetch(`/api/news/stock/${upper}`)
+        .then((r) => r.json())
+        .then((data) => setNews(data.items ?? []))
+        .finally(() => setNewsLoading(false));
+    }, 0);
+    return () => clearTimeout(id);
   }, [upper]);
 
   const stockInfo = stock ?? {

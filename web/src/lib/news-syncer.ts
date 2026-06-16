@@ -14,7 +14,6 @@ import {
   getGoogleNewsForTicker,
   normalizeCoinDeskItem,
   normalizeGoogleNewsItem,
-  repairMarketsArticle,
 } from "@/lib/news-rss";
 import {
   getNewsStoreUpdatedAt,

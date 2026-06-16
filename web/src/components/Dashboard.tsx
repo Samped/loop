@@ -4,18 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CryptoStock, MarketSnapshot, Sector } from "@/lib/sosovalue";
 import { SectorCards } from "@/components/SectorCards";
 import { StockList } from "@/components/StockList";
-
-function StatPill({ label, value, sub, status }: { label: string; value: string; sub?: string; status?: "ok" | "warn" }) {
-  return (
-    <div className="glass-card rounded-2xl p-4 sm:p-5">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">{label}</p>
-      <p className={`mt-1.5 text-base font-semibold sm:text-lg ${status === "warn" ? "text-amber-400" : "text-zinc-100"}`}>
-        {value}
-      </p>
-      {sub && <p className="mt-1 text-xs text-zinc-500">{sub}</p>}
-    </div>
-  );
-}
+import { DashboardStatCard, PerpPromoCard } from "@/components/PerpPromoCard";
+import { DashboardPerpPositions } from "@/components/DashboardPerpPositions";
 
 export function Dashboard() {
   const [catalog, setCatalog] = useState<CryptoStock[]>([]);
@@ -55,7 +45,8 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    loadMarketData();
+    const id = setTimeout(() => void loadMarketData(), 0);
+    return () => clearTimeout(id);
   }, [loadMarketData]);
 
   useEffect(() => {
@@ -112,6 +103,18 @@ export function Dashboard() {
     return () => es.close();
   }, [loading]);
 
+  const liveSub =
+    pricesRefreshing && listedStocks.length < priceTotal
+      ? `Syncing ${listedStocks.length} of ${priceTotal}`
+      : chartReady.size > 0
+        ? `${chartReady.size} charts ready`
+        : "Charts syncing";
+
+  const syncProgress =
+    pricesRefreshing && listedStocks.length < priceTotal
+      ? Math.min(100, (listedStocks.length / priceTotal) * 100)
+      : 100;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
       {loading ? (
@@ -121,35 +124,29 @@ export function Dashboard() {
         </div>
       ) : (
         <div className="space-y-8">
-          <div className="max-w-xs">
-              <StatPill
-                label="Live Prices"
-                value={`${listedStocks.length} stocks`}
-                sub={
-                  pricesRefreshing && listedStocks.length < priceTotal
-                    ? `Syncing ${listedStocks.length} of ${priceTotal}`
-                    : chartReady.size > 0
-                      ? `${chartReady.size} charts ready`
-                      : "Charts syncing"
-                }
-              />
-              {pricesRefreshing && listedStocks.length < priceTotal && (
-                <div className="mt-2 h-px overflow-hidden rounded-full bg-white/[0.06]">
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
+            <DashboardStatCard
+              label="Live Prices"
+              value={`${listedStocks.length} stocks`}
+              sub={liveSub}
+              accent="emerald"
+              footer={
+                <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
                   <div
-                    className="h-full rounded-full bg-emerald-500/40 transition-all duration-700 ease-out"
-                    style={{ width: `${Math.min(100, (listedStocks.length / priceTotal) * 100)}%` }}
+                    className="h-full rounded-full bg-emerald-500/50 transition-all duration-700 ease-out"
+                    style={{ width: `${syncProgress}%` }}
                   />
                 </div>
-              )}
-            </div>
-
-            <SectorCards sectors={sectors} source={marketSource} />
-
-            <StockList
-              stocks={listedStocks}
-              snapshots={snapshots}
-              chartReady={chartReady}
+              }
             />
+            <PerpPromoCard />
+          </div>
+
+          <DashboardPerpPositions />
+
+          <SectorCards sectors={sectors} source={marketSource} />
+
+          <StockList stocks={listedStocks} snapshots={snapshots} chartReady={chartReady} />
         </div>
       )}
     </div>

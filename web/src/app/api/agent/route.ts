@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAddress } from "viem";
 import { getCachedCryptoStocks } from "@/lib/market-data";
-import { getPortfolioForAddress } from "@/lib/portfolio";
+import { getCachedPortfolioForAddress } from "@/lib/portfolio-cache";
 import { getStoredKlines, getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { filterListedSnapshots } from "@/lib/stock-ready";
 
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     try {
       const stocks = getStoredStocks() ?? (await getCachedCryptoStocks()).stocks;
       const snapshots = filterListedSnapshots(getStoredSnapshots());
-      const portfolio = await getPortfolioForAddress(
+      const portfolio = await getCachedPortfolioForAddress(
         address as `0x${string}`,
         stocks,
         snapshots,
