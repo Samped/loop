@@ -125,8 +125,28 @@ export type Kline = {
   volume: number;
 };
 
+function klineTimestampMs(ts: unknown): number {
+  const n = toNumber(ts);
+  if (n <= 0) return 0;
+  return n < 10_000_000_000 ? n * 1000 : n;
+}
+
+export function normalizeKline(raw: Partial<Kline> & Record<string, unknown>): Kline {
+  return {
+    timestamp: klineTimestampMs(raw.timestamp),
+    open: toNumber(raw.open),
+    high: toNumber(raw.high),
+    low: toNumber(raw.low),
+    close: toNumber(raw.close),
+    volume: toNumber(raw.volume),
+  };
+}
+
 export async function getKlines(ticker: string, limit = 90): Promise<Kline[]> {
-  return sosoFetch<Kline[]>(`/crypto-stocks/${ticker}/klines?interval=1d&limit=${limit}`);
+  const raw = await sosoFetch<Array<Partial<Kline> & Record<string, unknown>>>(
+    `/crypto-stocks/${ticker}/klines?interval=1d&limit=${limit}`,
+  );
+  return raw.map(normalizeKline).filter((k) => k.timestamp > 0 && k.close > 0);
 }
 
 export type SosoNewsCurrency = {

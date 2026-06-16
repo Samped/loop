@@ -16,21 +16,106 @@ function formatDate(ts: number) {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function toNum(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toMs(ts: unknown): number {
+  const n = toNum(ts);
+  if (n <= 0) return Date.now();
+  // Some feeds send seconds while others send milliseconds (or stringified ms).
+  return n < 10_000_000_000 ? n * 1000 : n;
+}
+
+function normalizeKline(k: Kline): Kline {
+  return {
+    timestamp: toMs(k.timestamp),
+    open: toNum(k.open),
+    high: toNum(k.high),
+    low: toNum(k.low),
+    close: toNum(k.close),
+    volume: toNum(k.volume),
+  };
+}
+
 function formatVolume(value: number) {
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (value >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
   return value.toLocaleString();
 }
 
-export function PriceChart({ klines, ticker }: { klines: Kline[]; ticker: string }) {
+export function PriceChart({
+  klines,
+  ticker,
+  latestPrice,
+  latestTimestamp,
+}: {
+  klines: Kline[];
+  ticker: string;
+  latestPrice?: number;
+  latestTimestamp?: number;
+}) {
   const [range, setRange] = useState<Range>("3M");
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
+  const normalized = useMemo(() => {
+    const sorted = [...klines].map(normalizeKline).sort((a, b) => a.timestamp - b.timestamp);
+    const deduped: Kline[] = [];
+    for (const k of sorted) {
+      const prev = deduped[deduped.length - 1];
+      if (prev && prev.timestamp === k.timestamp) {
+        // Merge duplicate timestamps from mixed feed updates.
+        prev.high = Math.max(prev.high, k.high);
+        prev.low = Math.min(prev.low, k.low);
+        prev.close = k.close;
+        prev.volume += k.volume;
+      } else {
+        deduped.push({ ...k });
+      }
+    }
+
+    if (!latestPrice || latestPrice <= 0) return deduped;
+    const last = deduped[deduped.length - 1];
+    const snapTs = toNum(latestTimestamp);
+    const ts = snapTs > 0 ? toMs(snapTs) : (last?.timestamp ?? 0);
+    if (!last) {
+      return [
+        {
+          timestamp: ts,
+          open: latestPrice,
+          high: latestPrice,
+          low: latestPrice,
+          close: latestPrice,
+          volume: 0,
+        },
+      ];
+    }
+
+    // Always align the latest candle close with live snapshot for a single displayed price.
+    const aligned = [...deduped];
+    const tail = aligned[aligned.length - 1]!;
+    tail.close = latestPrice;
+    tail.high = Math.max(tail.high, latestPrice);
+    tail.low = Math.min(tail.low, latestPrice);
+    if (ts > tail.timestamp) {
+      aligned.push({
+        timestamp: ts,
+        open: tail.close,
+        high: Math.max(tail.close, latestPrice),
+        low: Math.min(tail.close, latestPrice),
+        close: latestPrice,
+        volume: 0,
+      });
+    }
+    return aligned;
+  }, [klines, latestPrice, latestTimestamp]);
+
   const filtered = useMemo(() => {
     const days = RANGE_DAYS[range];
-    if (days === Infinity) return klines;
-    return klines.slice(-days);
-  }, [klines, range]);
+    if (days === Infinity) return normalized;
+    return normalized.slice(-days);
+  }, [normalized, range]);
 
   if (filtered.length === 0) {
     return (
@@ -70,7 +155,7 @@ export function PriceChart({ klines, ticker }: { klines: Kline[]; ticker: string
   const linePoints = closes.map((close, i) => `${xAt(i)},${yPrice(close)}`).join(" ");
 
   const first = filtered[0].close;
-  const displayClose = active.close;
+  const displayClose = hoverIndex == null && latestPrice && latestPrice > 0 ? latestPrice : active.close;
   const change = ((displayClose - first) / first) * 100;
   const dayChange =
     activeIndex > 0
@@ -189,7 +274,7 @@ export function PriceChart({ klines, ticker }: { klines: Kline[]; ticker: string
             const activeBar = i === activeIndex;
             return (
               <rect
-                key={`vol-${k.timestamp}`}
+                key={`vol-${k.timestamp}-${i}`}
                 x={x}
                 y={y}
                 width={barW}
