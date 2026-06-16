@@ -3,9 +3,10 @@ import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import type { NewsItem } from "@/lib/news";
 import { mixNewsFeed, storedToNewsItem } from "@/lib/news";
 import { getProviderCounts, getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
-import { getNewsSyncStatus, startNewsSyncer, syncNewsNow } from "@/lib/news-syncer";
-import { getStoredKlines, getStoredSnapshots, hydrateSnapshotStore } from "@/lib/snapshot-store";
+import { getNewsSyncStatus, requestNewsSync, startNewsSyncer } from "@/lib/news-syncer";
+import { getStoredKlines, getStoredSnapshots, getStoredSectors, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { filterListedSnapshots } from "@/lib/stock-ready";
+import { rateLimit } from "@/lib/api-guard";
 
 function formatPct(value: number) {
   const pct = value * 100;
@@ -17,11 +18,8 @@ async function buildSyntheticNews(): Promise<NewsItem[]> {
   const now = Date.now();
 
   try {
-    const [{ sectors }, { stocks }] = await Promise.all([
-      getCachedSectors(),
-      getCachedCryptoStocks(),
-    ]);
-
+    const sectors = getStoredSectors() ?? [];
+    const stocks = getStoredStocks() ?? [];
     const snapshots = filterListedSnapshots(getStoredSnapshots());
 
     for (const sector of sectors.filter((s) => s.sector_name !== "all")) {
@@ -87,29 +85,20 @@ async function buildSyntheticNews(): Promise<NewsItem[]> {
   return items;
 }
 
-let emptyStoreSyncStarted = false;
+export async function GET(req: Request) {
+  const limited = rateLimit(req, "api:news-get", 120, 60_000);
+  if (limited) return limited;
 
-export async function GET() {
   hydrateSnapshotStore();
   hydrateNewsStore();
   startNewsSyncer();
 
-  let stored = getStoredNewsArticles(500)
+  const force = new URL(req.url).searchParams.get("refresh") === "1";
+  requestNewsSync({ force, tickerSearch: false });
+
+  const stored = getStoredNewsArticles(500)
     .map(storedToNewsItem)
     .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
-
-  if (
-    stored.length === 0 &&
-    (process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY)
-  ) {
-    if (!emptyStoreSyncStarted) {
-      emptyStoreSyncStarted = true;
-      await syncNewsNow({ tickerSearch: false });
-      stored = getStoredNewsArticles(500)
-        .map(storedToNewsItem)
-        .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
-    }
-  }
 
   const hasNewsKeys = Boolean(
     process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { storedToNewsItem } from "@/lib/news";
 import { getStoredNewsForTicker, hydrateNewsStore } from "@/lib/news-store";
+import { requestNewsSync, startNewsSyncer } from "@/lib/news-syncer";
 import { hydrateSnapshotStore } from "@/lib/snapshot-store";
 
 export async function GET(
@@ -12,6 +13,8 @@ export async function GET(
 
   hydrateSnapshotStore();
   hydrateNewsStore();
+  startNewsSyncer();
+  requestNewsSync({ tickerSearch: false });
 
   const articles = getStoredNewsForTicker(upper, 50).map(storedToNewsItem);
 

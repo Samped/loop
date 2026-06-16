@@ -17,6 +17,7 @@ import {
 } from "@/lib/news-rss";
 import {
   getNewsStoreUpdatedAt,
+  getStoredNewsArticles,
   getTickerSearchCursor,
   hydrateNewsStore,
   persistNewsStore,
@@ -40,6 +41,9 @@ const TICKERS_PER_SYNC = 4;
 const FINNHUB_TICKERS_PER_SYNC = 6;
 const STALE_MS = 12 * 60 * 1000;
 const FINNHUB_DELAY_MS = 1_500;
+const REQUEST_COOLDOWN_MS = 90_000;
+
+let lastRequestAt = 0;
 
 export type NewsSyncStatus = {
   enabled: boolean;
@@ -301,6 +305,26 @@ export async function syncNewsNow(options?: { tickerSearch?: boolean }) {
   return runSync(options?.tickerSearch ?? true);
 }
 
+/** Non-blocking sync when the store is empty, stale, or due for refresh. */
+export function requestNewsSync(options?: { force?: boolean; tickerSearch?: boolean }) {
+  if (!hasAnyNewsSource()) return;
+  if (state.running) return;
+
+  hydrateNewsStore();
+  const lastUpdated = getNewsStoreUpdatedAt();
+  const storeStale = !lastUpdated || Date.now() - lastUpdated > STALE_MS;
+  const syncDue = !state.lastSyncAt || Date.now() - state.lastSyncAt > state.intervalMs;
+  const empty = getStoredNewsArticles(1).length === 0;
+  const shouldSync = options?.force || empty || storeStale || syncDue;
+  if (!shouldSync) return;
+
+  const now = Date.now();
+  if (!options?.force && now - lastRequestAt < REQUEST_COOLDOWN_MS) return;
+  lastRequestAt = now;
+
+  void runSync(options?.tickerSearch ?? empty);
+}
+
 /** Ingest headlines from SoSoValue, Finnhub, and CryptoPanic into data/news.json. */
 export function startNewsSyncer() {
   if (started) return;
@@ -319,7 +343,7 @@ export function startNewsSyncer() {
 
   const lastUpdated = getNewsStoreUpdatedAt();
   const stale = !lastUpdated || Date.now() - lastUpdated > STALE_MS;
-  const delay = stale ? STARTUP_DELAY_MS : STARTUP_DELAY_MS + 30_000;
+  const delay = stale ? 2_000 : STARTUP_DELAY_MS;
 
   setTimeout(() => void runSync(!lastUpdated), delay);
   timer = setInterval(() => void runSync(true), intervalMs);
