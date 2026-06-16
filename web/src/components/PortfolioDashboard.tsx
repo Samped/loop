@@ -6,7 +6,9 @@ import { useAccount } from "wagmi";
 import type { PortfolioData, PortfolioPerpPosition, PortfolioPosition } from "@/lib/portfolio";
 import { BALANCE_REFETCH_MS, PORTFOLIO_REFRESH_EVENT } from "@/lib/balance-refresh";
 import { PortfolioChart } from "@/components/PortfolioChart";
+import { RecentClosedTrades } from "@/components/RecentClosedTrades";
 import { useMounted } from "@/hooks/useMounted";
+import { fetchJson } from "@/lib/fetch-json";
 
 function shortenAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -191,9 +193,9 @@ export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) 
     }
     setError(null);
     try {
-      const res = await fetch(`/api/portfolio/${address}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to load portfolio");
+      const data = await fetchJson<PortfolioData & { error?: string }>(`/api/portfolio/${address}`);
+      if (!data) throw new Error("Request timed out");
+      if ("error" in data && data.error) throw new Error(data.error);
       setPortfolio(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load portfolio");
@@ -371,6 +373,8 @@ export function PortfolioDashboard({ refreshKey = 0 }: { refreshKey?: number }) 
           ))}
         </div>
       )}
+
+      <RecentClosedTrades />
     </section>
   );
 }

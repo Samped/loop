@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -19,6 +19,7 @@ import { useUsdcBalance } from "@/hooks/useUsdcBalance";
 import { invalidateTradeBalances } from "@/lib/invalidate-balances";
 import { BALANCE_REFETCH_MS } from "@/lib/balance-refresh";
 import { formatTradeError } from "@/lib/trade-errors";
+import { recordClosedTradeClient } from "@/lib/record-closed-trade";
 
 function formatSyncAge(timestamp: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
@@ -56,6 +57,11 @@ export function TradePanel({
   const [confirmedTxHash, setConfirmedTxHash] = useState<`0x${string}` | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [trading, setTrading] = useState(false);
+  const pendingSellRef = useRef<{
+    ticker: string;
+    shares: number;
+    exitPrice: number | null;
+  } | null>(null);
 
   const { data: oracleStatus } = useQuery({
     queryKey: ["oracle-status"],
@@ -139,6 +145,19 @@ export function TradePanel({
   useEffect(() => {
     if (!isSuccess || !txHash) return;
     const id = setTimeout(() => {
+      if (pendingSellRef.current && address) {
+        const sell = pendingSellRef.current;
+        recordClosedTradeClient({
+          address,
+          tradeType: "spot",
+          ticker: sell.ticker,
+          side: "sell",
+          size: sell.shares,
+          exitPrice: sell.exitPrice,
+          txHash,
+        });
+        pendingSellRef.current = null;
+      }
       invalidateTradeBalances(queryClient);
       setConfirmedTxHash(txHash);
       setStatus(null);
@@ -148,17 +167,17 @@ export function TradePanel({
       onTradeComplete();
     }, 0);
     return () => clearTimeout(id);
-  }, [isSuccess, txHash, queryClient, onTradeComplete, refetchHoldings]);
+  }, [isSuccess, txHash, queryClient, onTradeComplete, refetchHoldings, address]);
 
   const handleSyncPrices = async () => {
     setSyncing(true);
     setStatus(null);
     setStatusIsError(false);
     try {
-      const res = await fetch("/api/oracle/sync-prices", { method: "POST" });
+      const res = await fetch("/api/oracle/nudge", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Sync failed");
-      setStatus(`Synced ${data.tickers.length} prices on-chain`);
+      setStatus(`Synced ${data.synced ?? 0} prices on-chain`);
       setStatusIsError(false);
       onPricesSynced?.();
     } catch (err) {
@@ -254,6 +273,12 @@ export function TradePanel({
           account: address,
         });
 
+        pendingSellRef.current = {
+          ticker: ticker!,
+          shares: Number(shares) / 1e18,
+          exitPrice: displayPrice,
+        };
+
         setStatus("Confirm sell in your wallet…");
         await writeContractAsync({
           chainId: ARC_CHAIN_ID,
@@ -264,6 +289,7 @@ export function TradePanel({
         });
       }
     } catch (err) {
+      pendingSellRef.current = null;
       setConfirmedTxHash(null);
       resetWrite();
       setStatus(formatTradeError(err));
