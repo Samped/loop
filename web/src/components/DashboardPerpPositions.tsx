@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import type { PortfolioPerpPosition } from "@/lib/portfolio";
 import { formatPnlUsd } from "@/lib/perp";
-import { BALANCE_REFETCH_MS, PORTFOLIO_REFRESH_EVENT } from "@/lib/balance-refresh";
+import { PORTFOLIO_REFRESH_EVENT } from "@/lib/balance-refresh";
+import { fetchJson } from "@/lib/fetch-json";
 
-const POLL_MS = BALANCE_REFETCH_MS;
+const POLL_MS = 12_000;
 
 function PerpPositionRow({ p }: { p: PortfolioPerpPosition }) {
   const isLong = p.side === "long";
@@ -63,19 +64,21 @@ function PerpPositionRow({ p }: { p: PortfolioPerpPosition }) {
 export function DashboardPerpPositions() {
   const { address, isConnected } = useAccount();
   const [positions, setPositions] = useState<PortfolioPerpPosition[]>([]);
+  const loadingRef = useRef(false);
 
   const load = useCallback(async () => {
-    if (!address) {
-      setPositions([]);
-      return;
-    }
+    if (!address || loadingRef.current) return;
+    loadingRef.current = true;
     try {
-      const res = await fetch(`/api/perp/positions/${address}`, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setPositions(data.positions ?? []);
+      const data = await fetchJson<{ positions?: PortfolioPerpPosition[] }>(
+        `/api/perp/positions/${address}`,
+        10_000,
+      );
+      if (data) setPositions(data.positions ?? []);
     } catch {
       // keep last
+    } finally {
+      loadingRef.current = false;
     }
   }, [address]);
 
