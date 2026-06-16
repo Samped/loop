@@ -1,0 +1,52 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { CryptoStock, MarketSnapshot } from "@/lib/sosovalue";
+import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
+import { PerpMarketsList } from "@/components/PerpMarketsList";
+
+const POLL_MS = 5_000;
+
+export default function PerpMarketsPage() {
+  const [stocks, setStocks] = useState<CryptoStock[]>([]);
+  const [snapshots, setSnapshots] = useState<Record<string, MarketSnapshot>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const [stocksRes, snapsRes] = await Promise.all([
+        fetch("/api/market/stocks").then((r) => (r.ok ? r.json() : { stocks: [] })),
+        fetch("/api/market/snapshots").then((r) => (r.ok ? r.json() : { snapshots: {} })),
+      ]);
+      const all = (stocksRes.stocks ?? []) as CryptoStock[];
+      const perpSet = new Set<string>(PERP_MARKET_TICKERS);
+      setStocks(all.filter((s) => perpSet.has(s.ticker)));
+      setSnapshots(snapsRes.snapshots ?? {});
+      setLoading(false);
+    }
+
+    void load();
+    const interval = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+      <header className="mb-8">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-emerald-400/80">
+          Arc Testnet · Perpetuals
+        </p>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-zinc-100">Stock perp markets</h1>
+      </header>
+
+      {loading ? (
+        <div className="glass-card flex flex-col items-center justify-center rounded-2xl py-24">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-400" />
+          <p className="mt-4 text-sm text-zinc-500">Loading markets…</p>
+        </div>
+      ) : (
+        <PerpMarketsList stocks={stocks} snapshots={snapshots} />
+      )}
+    </div>
+  );
+}
