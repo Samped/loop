@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type { MarkCandle, MarkTick } from "@/lib/perp-mark-candles";
 import { getNeonSql } from "@/lib/neon";
+import { isNeonCircuitOpen, tripNeonCircuit, withNeonGuard } from "@/lib/neon-guard";
 import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
 
 /** 5-minute OHLC bars — compact enough for ~120 days per ticker on disk. */
@@ -22,13 +23,17 @@ type HistoryFile = {
 
 const STORE_PATH = join(process.cwd(), "data", "perp-mark-history.json");
 const BAR_MS = 5 * 60_000;
-/** ~120 days of 5m bars per ticker. */
+/** ~120 days of 5m bars per ticker on disk. */
 const MAX_BARS = 120 * 24 * 12;
+/** Max bars synced to Neon per persist (latest bar only). */
+const NEON_SYNC_BARS = 1;
+const PERSIST_DEBOUNCE_MS = 15_000;
 
 let hydrated = false;
 let barsByTicker: Record<string, StoredMarkBar[]> = {};
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let neonReady = false;
+let neonSyncInFlight = false;
 
 function ensureHydrated() {
   if (hydrated) return;
@@ -43,24 +48,28 @@ function ensureHydrated() {
 }
 
 async function ensureNeonSchema() {
-  if (neonReady) return;
+  if (neonReady || isNeonCircuitOpen()) return neonReady;
   const sql = getNeonSql();
-  if (!sql) return;
-  await sql`
-    CREATE TABLE IF NOT EXISTS perp_mark_history_5m (
-      ticker TEXT NOT NULL,
-      bucket_ts BIGINT NOT NULL,
-      open DOUBLE PRECISION NOT NULL,
-      high DOUBLE PRECISION NOT NULL,
-      low DOUBLE PRECISION NOT NULL,
-      close DOUBLE PRECISION NOT NULL,
-      ticks INTEGER NOT NULL,
-      updated_at BIGINT NOT NULL,
-      PRIMARY KEY (ticker, bucket_ts)
-    )
-  `;
-  await sql`CREATE INDEX IF NOT EXISTS idx_perp_mark_history_5m_ticker_ts ON perp_mark_history_5m (ticker, bucket_ts DESC)`;
-  neonReady = true;
+  if (!sql) return false;
+  const ok = await withNeonGuard(async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS perp_mark_history_5m (
+        ticker TEXT NOT NULL,
+        bucket_ts BIGINT NOT NULL,
+        open DOUBLE PRECISION NOT NULL,
+        high DOUBLE PRECISION NOT NULL,
+        low DOUBLE PRECISION NOT NULL,
+        close DOUBLE PRECISION NOT NULL,
+        ticks INTEGER NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (ticker, bucket_ts)
+      )
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_perp_mark_history_5m_ticker_ts ON perp_mark_history_5m (ticker, bucket_ts DESC)`;
+    return true;
+  }, 2_000);
+  if (ok) neonReady = true;
+  return neonReady;
 }
 
 function schedulePersist() {
@@ -68,24 +77,28 @@ function schedulePersist() {
   persistTimer = setTimeout(() => {
     persistTimer = null;
     void persistPerpMarkHistory();
-  }, 3000);
+  }, PERSIST_DEBOUNCE_MS);
 }
 
-export async function hydratePerpMarkHistoryStore() {
+export function hydratePerpMarkHistoryStore() {
   ensureHydrated();
   seedEmptyHistoryStores();
+  void hydratePerpMarkHistoryFromNeon();
+}
 
+async function hydratePerpMarkHistoryFromNeon() {
   const sql = getNeonSql();
   if (!sql) return;
 
   try {
-    await ensureNeonSchema();
-    const rows = (await sql`
+    if (!(await ensureNeonSchema())) return;
+
+    const rows = (await withNeonGuard(async () => sql`
       SELECT ticker, bucket_ts, open, high, low, close, ticks
       FROM perp_mark_history_5m
       WHERE ticker = ANY(${PERP_MARKET_TICKERS as unknown as string[]})
       ORDER BY ticker ASC, bucket_ts ASC
-    `) as Array<{
+    `, 3_000)) as Array<{
       ticker: string;
       bucket_ts: string | number;
       open: string | number;
@@ -93,7 +106,8 @@ export async function hydratePerpMarkHistoryStore() {
       low: string | number;
       close: string | number;
       ticks: string | number;
-    }>;
+    }> | null;
+    if (!rows) return;
 
     const next: Record<string, StoredMarkBar[]> = {};
     for (const ticker of PERP_MARKET_TICKERS) next[ticker] = [];
@@ -115,8 +129,8 @@ export async function hydratePerpMarkHistoryStore() {
     if (Object.values(next).some((list) => list.length > 0)) {
       barsByTicker = next;
     }
-  } catch (error) {
-    console.warn("[perp-mark-history] Neon hydrate failed, using local store", error);
+  } catch {
+    tripNeonCircuit();
   }
 }
 
@@ -125,35 +139,51 @@ export async function persistPerpMarkHistory() {
   seedEmptyHistoryStores();
   const dir = dirname(STORE_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const payload: HistoryFile = { updatedAt: Date.now(), bars: barsByTicker };
-  writeFileSync(STORE_PATH, JSON.stringify(payload));
+  writeFileSync(STORE_PATH, JSON.stringify({ updatedAt: Date.now(), bars: barsByTicker }));
 
+  queueNeonPersist();
+}
+
+function queueNeonPersist() {
+  if (neonSyncInFlight || isNeonCircuitOpen()) return;
   const sql = getNeonSql();
   if (!sql) return;
 
-  try {
-    await ensureNeonSchema();
-    for (const [ticker, list] of Object.entries(barsByTicker)) {
-      if (!list.length) continue;
-      const recent = list.slice(-MAX_BARS);
-      for (const bar of recent) {
-        await sql`
+  neonSyncInFlight = true;
+  void pushRecentBarsToNeon(sql).finally(() => {
+    neonSyncInFlight = false;
+  });
+}
+
+async function pushRecentBarsToNeon(sql: NonNullable<ReturnType<typeof getNeonSql>>) {
+  if (!(await ensureNeonSchema())) {
+    tripNeonCircuit();
+    return;
+  }
+
+  const now = Date.now();
+  for (const [ticker, list] of Object.entries(barsByTicker)) {
+    if (isNeonCircuitOpen()) return;
+    const recent = list.slice(-NEON_SYNC_BARS);
+    for (const bar of recent) {
+      const ok = await withNeonGuard(
+        () => sql`
           INSERT INTO perp_mark_history_5m
             (ticker, bucket_ts, open, high, low, close, ticks, updated_at)
           VALUES
-            (${ticker}, ${bar.t}, ${bar.o}, ${bar.h}, ${bar.l}, ${bar.c}, ${bar.n}, ${Date.now()})
+            (${ticker}, ${bar.t}, ${bar.o}, ${bar.h}, ${bar.l}, ${bar.c}, ${bar.n}, ${now})
           ON CONFLICT (ticker, bucket_ts)
           DO UPDATE SET
             high = GREATEST(perp_mark_history_5m.high, EXCLUDED.high),
             low = LEAST(perp_mark_history_5m.low, EXCLUDED.low),
             close = EXCLUDED.close,
-            ticks = perp_mark_history_5m.ticks + EXCLUDED.ticks,
+            ticks = EXCLUDED.ticks,
             updated_at = EXCLUDED.updated_at
-        `;
-      }
+        `,
+        1_500,
+      );
+      if (ok === null) return;
     }
-  } catch (error) {
-    console.warn("[perp-mark-history] Neon persist failed, local store kept", error);
   }
 }
 
