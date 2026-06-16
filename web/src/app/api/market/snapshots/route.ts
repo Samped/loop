@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCached, getStale } from "@/lib/market-cache";
 import { getCachedCryptoStocks } from "@/lib/market-data";
+import { ensureInitialSnapshots, isVercelServerless } from "@/lib/market-cold-start";
 import { mergePriceSources } from "@/lib/snapshot-utils";
 import { getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { isSnapshotWarmerActive, startSnapshotWarmer } from "@/lib/snapshot-warmer";
@@ -9,10 +10,19 @@ import { DEMO_STOCKS } from "@/lib/sosovalue";
 
 export async function GET() {
   hydrateSnapshotStore();
-  startSnapshotWarmer();
-  void getCachedCryptoStocks().catch(() => {});
+  if (!isVercelServerless) {
+    startSnapshotWarmer();
+  }
 
-  const stocks = getStoredStocks() ?? DEMO_STOCKS;
+  let stocks = getStoredStocks() ?? DEMO_STOCKS;
+  try {
+    const refreshed = await getCachedCryptoStocks();
+    stocks = refreshed.stocks;
+  } catch {
+    // keep stored or demo
+  }
+
+  await ensureInitialSnapshots(stocks, { demo: !process.env.SOSOVALUE_API_KEY });
   const tickers = stocks.map((s) => s.ticker);
   const cached = getStoredSnapshots();
 
@@ -27,7 +37,7 @@ export async function GET() {
     snapshots,
     count: Object.keys(snapshots).length,
     total: tickers.length,
-    refreshing: isSnapshotWarmerActive(),
+    refreshing: !isVercelServerless && isSnapshotWarmerActive(),
     source: Object.keys(cached).length > 0 ? "cache" : "none",
   });
 }

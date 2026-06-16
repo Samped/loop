@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
+import { ensureInitialSnapshots, isVercelServerless } from "@/lib/market-cold-start";
 import { getStoredSectors, getStoredSnapshots, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { isSnapshotWarmerActive, startSnapshotWarmer } from "@/lib/snapshot-warmer";
 import { startOracleSyncer } from "@/lib/oracle-syncer";
@@ -9,14 +10,18 @@ import { DEMO_SECTORS, DEMO_STOCKS } from "@/lib/sosovalue";
 import { rateLimit } from "@/lib/api-guard";
 import { withTimeout } from "@/lib/async-timeout";
 
-const LIVE_REFRESH_MS = 2_000;
+const LIVE_REFRESH_MS = 5_000;
+
+export const maxDuration = 15;
 
 export async function GET(req: Request) {
   const limited = rateLimit(req, "api:bootstrap-get", 120, 60_000);
   if (limited) return limited;
 
   hydrateSnapshotStore();
-  startSnapshotWarmer();
+  if (!isVercelServerless) {
+    startSnapshotWarmer();
+  }
   startOracleSyncer();
   startNewsSyncer();
 
@@ -38,6 +43,8 @@ export async function GET(req: Request) {
     if (allStocks === DEMO_STOCKS) marketSource = "demo";
   }
 
+  await ensureInitialSnapshots(allStocks, { demo: marketSource === "demo" });
+
   const snapshots = filterListedSnapshots(getStoredSnapshots());
   const listedStocks = allStocks.filter((s) => isStockListed(s.ticker));
   const chartReady = allStocks.filter((s) => isStockReady(s.ticker)).map((s) => s.ticker);
@@ -52,6 +59,6 @@ export async function GET(req: Request) {
     priceCount: listedStocks.length,
     chartCount: chartReady.length,
     priceTotal: allStocks.length,
-    pricesRefreshing: isSnapshotWarmerActive(),
+    pricesRefreshing: !isVercelServerless && isSnapshotWarmerActive(),
   });
 }
