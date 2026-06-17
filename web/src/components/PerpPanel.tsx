@@ -8,7 +8,7 @@ import {
   useReadContract,
   useWriteContract,
 } from "wagmi";
-import { keccak256, maxUint256, stringToBytes, type Address, type PublicClient } from "viem";
+import { keccak256, maxUint256, stringToBytes } from "viem";
 import type { MarketSnapshot } from "@/lib/sosovalue";
 import { useLivePerpMark } from "@/hooks/useLivePerpMark";
 import { usePerpContractConfig } from "@/hooks/usePerpContractConfig";
@@ -28,8 +28,10 @@ import {
   formatPerpPnl,
   isLiquidatableOnChain,
   isMarkPastLiquidation,
+  isPerpOracleStale,
   openSizeFromMargin,
   parsePerpSide,
+  shrinkOpenSizeForExecution,
 } from "@/lib/perp";
 import { formatTradeError } from "@/lib/trade-errors";
 import { recordClosedTradeClient } from "@/lib/record-closed-trade";
@@ -37,19 +39,23 @@ import { refreshAllBalances } from "@/lib/balance-refresh";
 
 const LEVERAGE_OPTIONS = [2, 3, 5, 10, 15, 20];
 const CONTRACT_POLL_MS = 1_000;
-const WALLET_TX_WAIT_MS = 60_000;
+const NUDGE_TIMEOUT_MS = 8_000;
 
-async function waitForWalletTxSlot(publicClient: PublicClient, address: Address) {
-  const deadline = Date.now() + WALLET_TX_WAIT_MS;
-  while (Date.now() < deadline) {
-    const [latest, pending] = await Promise.all([
-      publicClient.getTransactionCount({ address, blockTag: "latest" }),
-      publicClient.getTransactionCount({ address, blockTag: "pending" }),
+async function nudgePerpOracle(ticker: string) {
+  try {
+    await Promise.race([
+      fetch("/api/perp/nudge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker }),
+      }),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("nudge timeout")), NUDGE_TIMEOUT_MS);
+      }),
     ]);
-    if (pending === latest) return;
-    await new Promise((r) => setTimeout(r, 2000));
+  } catch {
+    // Non-fatal — user tx may still succeed if mark is fresh.
   }
-  throw new Error("Wallet still has pending transactions — wait and try again.");
 }
 
 export function PerpPanel({
@@ -137,6 +143,8 @@ export function PerpPanel({
   const { writeContractAsync, isPending, reset: resetWrite } = useWriteContract();
 
   const markPrice = market?.[1] ?? 0n;
+  const lastMarkUpdate = market?.[3] ?? 0n;
+  const oracleStale = isPerpOracleStale(lastMarkUpdate);
   const maxLeverage = market?.[4] ? Number(market[4]) : 20;
   const maintenanceMarginBps = market?.[5] ? Number(market[5]) : 500;
   const snapshotPrice = snapshot?.mkt_price ?? 0;
@@ -298,6 +306,11 @@ export function PerpPanel({
     );
 
   useEffect(() => {
+    if (!ticker || !contractAddress) return;
+    void nudgePerpOracle(ticker);
+  }, [ticker, contractAddress]);
+
+  useEffect(() => {
     if (!address || !ticker) return;
     if (!hasPosition) {
       fetch("/api/perp/watch", {
@@ -450,6 +463,12 @@ export function PerpPanel({
       setStatusIsError(true);
       return;
     }
+    if (oracleStale) {
+      setStatus("On-chain mark is stale — refreshing oracle, then retry");
+      setStatusIsError(true);
+      void nudgePerpOracle(ticker);
+      return;
+    }
     if (marginParsed === 0n || previewSize === 0n) {
       setStatus("Margin too low for this leverage at the on-chain mark");
       setStatusIsError(true);
@@ -457,26 +476,25 @@ export function PerpPanel({
     }
 
     setTrading(true);
-    setStatus(null);
+    setStatus("Refreshing on-chain mark…");
+    setStatusIsError(false);
     try {
-      await waitForWalletTxSlot(publicClient, address);
+      await nudgePerpOracle(ticker);
       const { data: freshMarket } = await refetchMarket();
       const chainMark = (freshMarket as readonly [boolean, bigint, bigint, bigint, number, number] | undefined)?.[1] ?? markPrice;
-      const openSize = openSizeFromMargin(marginParsed, leverage, chainMark, maxLeverage);
+      const freshLastUpdate =
+        (freshMarket as readonly [boolean, bigint, bigint, bigint, number, number] | undefined)?.[3] ?? lastMarkUpdate;
+      if (isPerpOracleStale(freshLastUpdate)) {
+        throw new Error("StaleOracle");
+      }
+      let openSize = openSizeFromMargin(marginParsed, leverage, chainMark, maxLeverage);
+      openSize = shrinkOpenSizeForExecution(openSize);
       if (openSize === 0n) {
         throw new Error("InsufficientMargin");
       }
       await ensureApproval(marginParsed);
       resetWrite();
-      await waitForWalletTxSlot(publicClient, address);
-      setStatus("Opening position…");
-      await publicClient.simulateContract({
-        address: contractAddress,
-        abi: perpContractAbi,
-        functionName: "openPosition",
-        args: [ticker, side === "long", marginParsed, openSize],
-        account: address,
-      });
+      setStatus("Confirm in wallet…");
       const hash = await writeContractAsync({
         address: contractAddress,
         abi: perpContractAbi,
@@ -523,16 +541,10 @@ export function PerpPanel({
           }
         : null;
     try {
-      await waitForWalletTxSlot(publicClient, address);
+      await nudgePerpOracle(ticker);
       await refetchMarket();
       await refetchPosition();
-      await publicClient.simulateContract({
-        address: contractAddress,
-        abi: perpContractAbi,
-        functionName: "closePosition",
-        args: [ticker, position.size],
-        account: address,
-      });
+      setStatus("Confirm in wallet…");
       const hash = await writeContractAsync({
         address: contractAddress,
         abi: perpContractAbi,
@@ -825,6 +837,11 @@ export function PerpPanel({
             )}
           </div>
 
+          {oracleStale && isConnected && (
+            <p className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+              On-chain mark is stale — syncing oracle before you can open a position.
+            </p>
+          )}
           {!isConnected && (
             <p className="mb-4 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
               Connect wallet to trade
@@ -838,7 +855,9 @@ export function PerpPanel({
 
           <button
             onClick={() => void handleOpen()}
-            disabled={trading || isPending || isSwitching || marginParsed === 0n || !isConnected}
+            disabled={
+              trading || isPending || isSwitching || marginParsed === 0n || !isConnected || oracleStale
+            }
             className={`w-full rounded-xl py-3.5 text-sm font-bold text-white transition-all disabled:opacity-40 disabled:shadow-none ${
               side === "long"
                 ? "bg-emerald-500 shadow-lg shadow-emerald-500/25 hover:bg-emerald-400 hover:shadow-emerald-500/35"

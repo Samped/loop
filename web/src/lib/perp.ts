@@ -31,6 +31,22 @@ export function parsePerpSide(side: number): PerpSide {
   return "none";
 }
 
+/** PerpEngine MAX_ORACLE_STALENESS — keep a small buffer before expiry. */
+export const PERP_ORACLE_STALE_SEC = 280;
+
+export function isPerpOracleStale(lastMarkUpdateSec: bigint | number, nowSec = Math.floor(Date.now() / 1000)): boolean {
+  const updated = typeof lastMarkUpdateSec === "bigint" ? Number(lastMarkUpdateSec) : lastMarkUpdateSec;
+  if (!updated) return true;
+  return nowSec > updated + PERP_ORACLE_STALE_SEC;
+}
+
+/** Slightly undersize so a mark tick between sign and mine does not exceed max leverage. */
+export function shrinkOpenSizeForExecution(sizeShares: bigint): bigint {
+  if (sizeShares <= 0n) return 0n;
+  const shrunk = (sizeShares * 99n) / 100n;
+  return shrunk > 0n ? shrunk : sizeShares;
+}
+
 export function sizeFromMargin(marginUsdc6: bigint, leverage: number, priceUsdc6: bigint): bigint {
   if (priceUsdc6 === 0n || leverage <= 0) return 0n;
   const notional = marginUsdc6 * BigInt(leverage);

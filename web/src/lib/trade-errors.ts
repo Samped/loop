@@ -84,5 +84,9 @@ export function formatTradeError(err: unknown): string {
     return "A previous transaction is still pending — wait ~30s for it to confirm, then try again once.";
   }
 
+  if (lower.includes("execution reverted") || lower.includes("reverted")) {
+    return "Transaction reverted on Arc — the on-chain mark may have moved or expired. Tap Open again (we refresh the oracle first).";
+  }
+
   return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
 }
