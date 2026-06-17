@@ -11,6 +11,7 @@
     "sync-news": "tsx scripts/sync-news.ts",
     "fetch-snapshots": "tsx scripts/fetch-all-snapshots.ts",
     "refresh-market-cache": "tsx scripts/refresh-market-cache.ts",
+    "refresh-perp-mark-cache": "tsx scripts/refresh-perp-mark-cache.ts",
     "warm-cache": "tsx scripts/warm-snapshots.ts",
     "deploy:contract": "bash scripts/deploy-contract.sh",
     "deploy:vault": "bash scripts/deploy-vault.sh"

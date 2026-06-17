@@ -37,6 +37,10 @@ export function getRangeWindowMs(range: ChartRange): number | null {
   return RANGE_MS[range];
 }
 
+export function getBucketMs(range: ChartRange): number {
+  return BUCKET_MS[range];
+}
+
 export function isStoredRange(range: ChartRange): boolean {
   return range === "1D" || range === "1W" || range === "1M" || range === "3M";
 }

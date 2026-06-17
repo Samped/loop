@@ -22,6 +22,7 @@ type HistoryFile = {
 };
 
 const STORE_PATH = join(process.cwd(), "data", "perp-mark-history.json");
+const BUNDLE_PATH = join(process.cwd(), "public", "perp-mark-cache.json");
 const BAR_MS = 5 * 60_000;
 /** ~120 days of 5m bars per ticker on disk. */
 const MAX_BARS = 120 * 24 * 12;
@@ -35,16 +36,26 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let neonReady = false;
 let neonSyncInFlight = false;
 
+function loadHistoryFile(path: string): HistoryFile | null {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as HistoryFile;
+  } catch {
+    return null;
+  }
+}
+
 function ensureHydrated() {
   if (hydrated) return;
   hydrated = true;
-  if (!existsSync(STORE_PATH)) return;
-  try {
-    const raw = JSON.parse(readFileSync(STORE_PATH, "utf8")) as HistoryFile;
-    barsByTicker = raw.bars ?? {};
-  } catch {
-    barsByTicker = {};
+
+  const candidates = [STORE_PATH, BUNDLE_PATH].filter((p) => existsSync(p));
+  let best: HistoryFile | null = null;
+  for (const path of candidates) {
+    const raw = loadHistoryFile(path);
+    if (!raw) continue;
+    if (!best || (raw.updatedAt ?? 0) >= (best.updatedAt ?? 0)) best = raw;
   }
+  barsByTicker = best?.bars ?? {};
 }
 
 async function ensureNeonSchema() {

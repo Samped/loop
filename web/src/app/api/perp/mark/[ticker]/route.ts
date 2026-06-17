@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { synthesizeMarkCandle } from "@/lib/perp-mark-chart-server";
 import {
   advancePerpMark,
   getPerpMarkCandles,
@@ -39,7 +40,10 @@ export async function GET(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Mark unavailable" }, { status: 404 });
   }
 
-  const candles = getPerpMarkCandles(upper, range);
+  let candles = getPerpMarkCandles(upper, range);
+  if (!candles.length && snap.price > 0) {
+    candles = [synthesizeMarkCandle(snap.price, snap.updatedAt)];
+  }
   return NextResponse.json(
     { ...snap, range, candles },
     { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } },

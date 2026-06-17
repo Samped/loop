@@ -5,6 +5,8 @@ import {
   CHART_COLORS,
   formatChartTime,
   formatPrice,
+  getBucketMs,
+  getRangeWindowMs,
   loadSavedChartRange,
   nicePriceStep,
   saveChartRange,
@@ -159,7 +161,15 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
     priceMax += pad;
     const priceSpan = priceMax - priceMin || 1;
 
-    const xAt = (i: number) => PAD.left + (i / Math.max(candles.length - 1, 1)) * CHART_W;
+    const windowMs = getRangeWindowMs(range) ?? 15 * 60_000;
+    const windowEnd = Math.max(Date.now(), candles[candles.length - 1]!.t + getBucketMs(range));
+    const windowStart = windowEnd - windowMs;
+    const timeSpan = Math.max(windowEnd - windowStart, 1);
+
+    const xAt = (ts: number) => {
+      const ratio = (ts - windowStart) / timeSpan;
+      return PAD.left + Math.min(1, Math.max(0, ratio)) * CHART_W;
+    };
     const yPrice = (price: number) => PAD.top + (1 - (price - priceMin) / priceSpan) * PRICE_H;
     const volTop = PAD.top + PRICE_H + 6;
     const volMax = Math.max(...candles.map((c) => c.ticks), 1);
@@ -171,14 +181,32 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
       gridPrices.push(p);
     }
 
-    const linePoints = candles.map((c, i) => `${xAt(i)},${yPrice(c.close)}`).join(" ");
-    const candleW = Math.max((CHART_W / candles.length) * 0.72, 2.5);
+    const bucketMs = getBucketMs(range);
+    const slotW = (bucketMs / timeSpan) * CHART_W * 0.82;
+    const candleW = Math.min(Math.max(slotW, 2.5), 12);
+    const linePoints = candles.map((c) => `${xAt(c.t)},${yPrice(c.close)}`).join(" ");
+
+    const nearestIndex = (ts: number) => {
+      let best = 0;
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < candles.length; i++) {
+        const dist = Math.abs(candles[i]!.t - ts);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      return best;
+    };
 
     return {
       candles,
       priceMin,
       priceMax,
+      windowStart,
+      windowEnd,
       xAt,
+      nearestIndex,
       yPrice,
       yVol,
       volTop,
@@ -188,7 +216,7 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
       candleW,
       last: candles[candles.length - 1].close,
     };
-  }, [candles, meta.anchorPrice]);
+  }, [candles, meta.anchorPrice, range]);
 
   const activeIndex = hoverIndex ?? (chart ? chart.candles.length - 1 : 0);
   const active: MarkCandle | null = chart ? chart.candles[activeIndex] ?? null : null;
@@ -199,8 +227,8 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
       const scale = rect.width / W;
       const x = (clientX - rect.left) / scale;
       const ratio = (x - PAD.left) / CHART_W;
-      const index = Math.round(ratio * (chart.candles.length - 1));
-      setHoverIndex(Math.max(0, Math.min(chart.candles.length - 1, index)));
+      const targetT = chart.windowStart + ratio * (chart.windowEnd - chart.windowStart);
+      setHoverIndex(chart.nearestIndex(targetT));
     },
     [chart],
   );
@@ -431,13 +459,13 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
 
           <g clipPath={`url(#clip-${upper})`}>
             {/* Volume bars */}
-            {chart.candles.map((c, i) => {
-              const x = chart.xAt(i);
+            {chart.candles.map((c) => {
+              const x = chart.xAt(c.t);
               const barW = Math.max(chart.candleW * 0.9, 2);
               const y = chart.yVol(c.ticks);
               const h = chart.volTop + VOL_H - 4 - y;
               const bullish = c.close >= c.open;
-              const activeBar = i === activeIndex;
+              const activeBar = c.t === active.t;
               return (
                 <rect
                   key={`v-${c.t}`}
@@ -493,8 +521,8 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
 
             {/* Candles or line */}
             {chartMode === "candles"
-              ? chart.candles.map((c, i) => {
-                  const x = chart.xAt(i);
+              ? chart.candles.map((c) => {
+                  const x = chart.xAt(c.t);
                   const bullish = c.close >= c.open;
                   const color = bullish ? CHART_COLORS.bull : CHART_COLORS.bear;
                   const bodyTop = chart.yPrice(Math.max(c.open, c.close));
@@ -502,7 +530,7 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
                   const bodyH = Math.max(bodyBot - bodyTop, 1);
                   const wickTop = chart.yPrice(c.high);
                   const wickBot = chart.yPrice(c.low);
-                  const dimmed = hoverIndex != null && i !== activeIndex;
+                  const dimmed = hoverIndex != null && c.t !== active.t;
                   return (
                     <g key={`c-${c.t}`} opacity={dimmed ? 0.45 : 1}>
                       <line
@@ -547,9 +575,9 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
           {hoverIndex != null ? (
             <>
               <line
-                x1={chart.xAt(activeIndex)}
+                x1={chart.xAt(active.t)}
                 y1={PAD.top}
-                x2={chart.xAt(activeIndex)}
+                x2={chart.xAt(active.t)}
                 y2={chart.volTop + VOL_H}
                 stroke={CHART_COLORS.crosshair}
                 strokeWidth="1"
@@ -605,7 +633,7 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
                 {formatPrice(chart.last)}
               </text>
               <circle
-                cx={chart.xAt(chart.candles.length - 1)}
+                cx={chart.xAt(chart.candles[chart.candles.length - 1]!.t)}
                 cy={chart.yPrice(chart.last)}
                 r="3.5"
                 fill={trendColor}
@@ -623,7 +651,7 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
             return (
               <text
                 key={`x-${frac}`}
-                x={chart.xAt(i)}
+                x={chart.xAt(c.t)}
                 y={H - 5}
                 fill={CHART_COLORS.axis}
                 fontSize="9"
