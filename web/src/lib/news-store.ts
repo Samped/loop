@@ -5,6 +5,7 @@ import { stripHtml } from "@/lib/news";
 import { repairMarketsArticle } from "@/lib/news-rss";
 
 const STORE_PATH = join(process.cwd(), "data", "news.json");
+const BUNDLE_PATH = join(process.cwd(), "public", "news-cache.json");
 const MAX_ARTICLES = 500;
 
 /** Keep secondary sources from being evicted by high-volume SoSoValue tweets. */
@@ -57,40 +58,51 @@ let byTicker: Record<string, string[]> = {};
 let tickerSearchCursor = 0;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
+function loadNewsFile(path: string): NewsFile | null {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as NewsFile;
+  } catch {
+    return null;
+  }
+}
+
+function applyNewsFile(raw: NewsFile) {
+  const rawArticles = raw.articles ?? [];
+  articles = repairArticles(rawArticles);
+  byTicker = {};
+  for (const article of articles) {
+    indexArticle(article, byTicker);
+  }
+  tickerSearchCursor = raw.tickerSearchCursor ?? 0;
+  updatedAt = raw.updatedAt ?? 0;
+}
+
 function ensureHydrated() {
   if (hydrated) return;
   hydrated = true;
 
-  if (!existsSync(STORE_PATH)) return;
+  const candidates = [STORE_PATH, BUNDLE_PATH].filter((p) => existsSync(p));
+  let best: NewsFile | null = null;
+  for (const path of candidates) {
+    const raw = loadNewsFile(path);
+    if (!raw) continue;
+    if (!best || (raw.updatedAt ?? 0) >= (best.updatedAt ?? 0)) best = raw;
+  }
+  if (!best) return;
 
-  try {
-    const raw = JSON.parse(readFileSync(STORE_PATH, "utf8")) as NewsFile;
-    const rawArticles = raw.articles ?? [];
-    articles = repairArticles(rawArticles);
-    byTicker = {};
-    for (const article of articles) {
-      indexArticle(article, byTicker);
-    }
-    tickerSearchCursor = raw.tickerSearchCursor ?? 0;
-    updatedAt = raw.updatedAt ?? 0;
+  applyNewsFile(best);
 
-    if (articles.length !== rawArticles.length) {
-      updatedAt = Date.now();
-      writeFileSync(
-        STORE_PATH,
-        JSON.stringify({
-          updatedAt,
-          articles,
-          byTicker,
-          tickerSearchCursor,
-        } satisfies NewsFile),
-      );
-    }
-  } catch {
-    articles = [];
-    byTicker = {};
-    tickerSearchCursor = 0;
-    updatedAt = 0;
+  if (articles.length !== (best.articles ?? []).length && !process.env.VERCEL) {
+    updatedAt = Date.now();
+    writeFileSync(
+      STORE_PATH,
+      JSON.stringify({
+        updatedAt,
+        articles,
+        byTicker,
+        tickerSearchCursor,
+      } satisfies NewsFile),
+    );
   }
 }
 
@@ -253,6 +265,7 @@ export function upsertNewsArticles(incoming: StoredNewsArticle[]) {
 }
 
 export function persistNewsStore() {
+  if (process.env.VERCEL) return;
   ensureHydrated();
   const dir = dirname(STORE_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

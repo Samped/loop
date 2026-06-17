@@ -51,6 +51,12 @@ async function main() {
     if (parts.length) console.log(`By source: ${parts.join(", ")}`);
   }
 
+  const { copyFileSync } = await import("fs");
+  const { resolve } = await import("path");
+  const bundle = resolve(__dirname, "../public/news-cache.json");
+  copyFileSync(resolve(__dirname, "../data/news.json"), bundle);
+  console.log(`Updated ${bundle}`);
+
   const sample = getStoredNewsArticles(5).filter((a) => a.provider !== "sosovalue").slice(0, 3);
   const fallback = sample.length ? sample : getStoredNewsArticles(3);
   for (const article of fallback) {

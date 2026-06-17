@@ -3,7 +3,7 @@ import { getCachedCryptoStocks, getCachedSectors } from "@/lib/market-data";
 import type { NewsItem } from "@/lib/news";
 import { mixNewsFeed, storedToNewsItem } from "@/lib/news";
 import { getProviderCounts, getStoredNewsArticles, hydrateNewsStore } from "@/lib/news-store";
-import { getNewsSyncStatus, requestNewsSync, startNewsSyncer } from "@/lib/news-syncer";
+import { getNewsSyncStatus, requestNewsSync, startNewsSyncer, syncNewsNow } from "@/lib/news-syncer";
 import { getStoredKlines, getStoredSnapshots, getStoredSectors, getStoredStocks, hydrateSnapshotStore } from "@/lib/snapshot-store";
 import { filterListedSnapshots } from "@/lib/stock-ready";
 import { rateLimit } from "@/lib/api-guard";
@@ -94,23 +94,30 @@ export async function GET(req: Request) {
   startNewsSyncer();
 
   const force = new URL(req.url).searchParams.get("refresh") === "1";
-  requestNewsSync({ force, tickerSearch: false });
-
-  const stored = getStoredNewsArticles(500)
-    .map(storedToNewsItem)
-    .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
-
   const hasNewsKeys = Boolean(
     process.env.SOSOVALUE_API_KEY || process.env.FINNHUB_API_KEY || process.env.CRYPTOPANIC_API_KEY,
   );
-  const synthetic = !hasNewsKeys && stored.length === 0 ? await buildSyntheticNews() : [];
-  const items = mixNewsFeed([...stored, ...synthetic], 300);
+
+  let stored = getStoredNewsArticles(500);
+  if (hasNewsKeys && (force || stored.length === 0)) {
+    await syncNewsNow({ tickerSearch: force && stored.length > 0 });
+    stored = getStoredNewsArticles(500);
+  } else {
+    requestNewsSync({ force, tickerSearch: false });
+  }
+
+  const articles = stored
+    .map(storedToNewsItem)
+    .filter((item) => item.category === "article" && item.source && item.source !== "synthetic");
+
+  const synthetic = !hasNewsKeys && articles.length === 0 ? await buildSyntheticNews() : [];
+  const items = mixNewsFeed([...articles, ...synthetic], 300);
   const status = getNewsSyncStatus();
 
   return NextResponse.json({
     items,
-    source: stored.length ? "multi" : hasNewsKeys ? "syncing" : "synthetic",
-    articleCount: stored.length,
+    source: articles.length ? "multi" : hasNewsKeys ? "syncing" : "synthetic",
+    articleCount: articles.length,
     providerCounts: getProviderCounts(),
     sync: status,
   });
