@@ -1,7 +1,7 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { hydrateSnapshotStore } = await import("@/lib/snapshot-store");
-    const { hydratePerpMarkHistoryStore } = await import("@/lib/perp-mark-history-store");
+    const { ensurePerpMarkHistoryReady } = await import("@/lib/perp-mark-history-store");
     const { hydrateClosedTradesStore } = await import("@/lib/closed-trades-store");
     const { startSnapshotWarmer } = await import("@/lib/snapshot-warmer");
     const { startOracleSyncer } = await import("@/lib/oracle-syncer");
@@ -10,7 +10,7 @@ export async function register() {
     const { startPerpMarkEngine } = await import("@/lib/perp-mark-engine-runner");
     const { startPerpFundingSyncer } = await import("@/lib/perp-funding-syncer");
     hydrateSnapshotStore();
-    void hydratePerpMarkHistoryStore();
+    await ensurePerpMarkHistoryReady();
     void hydrateClosedTradesStore();
     startSnapshotWarmer();
     startOracleSyncer();

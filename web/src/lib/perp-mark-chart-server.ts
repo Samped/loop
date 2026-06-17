@@ -1,13 +1,12 @@
 import "server-only";
 import {
   aggregateBars,
-  getStoredMarkBars,
+  getStoredBarsForChart,
   type StoredMarkBar,
 } from "@/lib/perp-mark-history-store";
 import {
   buildCandles,
   getBucketMs,
-  getRangeWindowMs,
   isStoredRange,
   type ChartRange,
   type MarkCandle,
@@ -31,33 +30,13 @@ function mergeCandleSeries(base: MarkCandle[], overlay: MarkCandle[]): MarkCandl
   return [...map.values()].sort((a, b) => a.t - b.t);
 }
 
-/** Live intraday candles are 5s–5m buckets; persisted bars are always 5m+. */
-function prependStoredContext(
-  stored: MarkCandle[],
-  live: MarkCandle[],
-  range: ChartRange,
-): MarkCandle[] {
-  if (!stored.length || !live.length) return live.length ? live : stored;
-  const windowMs = getRangeWindowMs(range);
-  if (windowMs == null) return mergeCandleSeries(stored, live);
-
-  const windowStart = live[0]!.t - windowMs;
-  const bucketMs = getBucketMs(range);
-  const context = stored.filter((bar) => bar.t < live[0]!.t && bar.t >= windowStart - bucketMs);
-  if (!context.length) return live;
-  return mergeCandleSeries(context, live);
-}
-
 /** Build chart candles from persisted 5m bars (+ optional live ticks for the open bar). */
 export function buildCandlesFromStored(
   ticker: string,
   range: ChartRange,
   liveTicks: MarkTick[] = [],
 ): MarkCandle[] {
-  const windowMs = getRangeWindowMs(range) ?? 90 * 24 * 60 * 60_000;
-  const since = Date.now() - windowMs;
-  const stored = getStoredMarkBars(ticker, since);
-
+  const stored = getStoredBarsForChart(ticker, range);
   const bucketMs = getBucketMs(range);
   const fromStored = aggregateBars(stored, bucketMs);
   const tickCandles = buildCandles(liveTicks, range);
@@ -66,12 +45,9 @@ export function buildCandlesFromStored(
     return fromStored;
   }
 
-  // Intraday: prefer high-frequency live ticks. Coarse 5m bars alone look like 1–2 giant candles.
+  // Serverless: persisted 5m bars are the reliable base. Overlay live ticks when dense.
   if (tickCandles.length >= 6) {
-    return tickCandles;
-  }
-  if (tickCandles.length >= 2) {
-    return prependStoredContext(fromStored, tickCandles, range);
+    return mergeCandleSeries(fromStored, tickCandles);
   }
   if (fromStored.length > 0) return fromStored;
   return tickCandles;
@@ -86,4 +62,21 @@ export function synthesizeMarkCandle(price: number, at = Date.now()): MarkCandle
   const bucketMs = 15_000;
   const t = Math.floor(at / bucketMs) * bucketMs;
   return { t, open: price, high: price, low: price, close: price, ticks: 1 };
+}
+
+/** Placeholder series when no history exists yet (serverless cold start). */
+export function synthesizeMarkCandlesFromPrice(
+  price: number,
+  range: ChartRange,
+  at = Date.now(),
+): MarkCandle[] {
+  const bucketMs = getBucketMs(range);
+  const barCount =
+    range === "5M" ? 6 : range === "15M" ? 8 : range === "1H" ? 12 : range === "4H" ? 16 : 4;
+  const candles: MarkCandle[] = [];
+  for (let i = barCount - 1; i >= 0; i--) {
+    const t = Math.floor((at - i * bucketMs) / bucketMs) * bucketMs;
+    candles.push({ t, open: price, high: price, low: price, close: price, ticks: 1 });
+  }
+  return candles;
 }

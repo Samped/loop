@@ -162,8 +162,11 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
     const priceSpan = priceMax - priceMin || 1;
 
     const windowMs = getRangeWindowMs(range) ?? 15 * 60_000;
-    const windowEnd = Math.max(Date.now(), candles[candles.length - 1]!.t + getBucketMs(range));
-    const windowStart = windowEnd - windowMs;
+    const bucketMs = getBucketMs(range);
+    const dataStart = candles[0]!.t;
+    const dataEnd = candles[candles.length - 1]!.t + bucketMs;
+    const windowEnd = Math.max(Date.now(), dataEnd);
+    const windowStart = Math.min(windowEnd - windowMs, dataStart);
     const timeSpan = Math.max(windowEnd - windowStart, 1);
 
     const xAt = (ts: number) => {
@@ -181,7 +184,6 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
       gridPrices.push(p);
     }
 
-    const bucketMs = getBucketMs(range);
     const slotW = (bucketMs / timeSpan) * CHART_W * 0.82;
     const candleW = Math.min(Math.max(slotW, 2.5), 12);
     const linePoints = candles.map((c) => `${xAt(c.t)},${yPrice(c.close)}`).join(" ");
@@ -245,11 +247,8 @@ export function PerpLiveMarkChart({ ticker }: { ticker: string }) {
   if (!chart || !active) {
     return (
       <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#08080c] px-6 py-16 text-center text-sm text-zinc-500">
-        <p className="text-zinc-400">Building mark history for {range}…</p>
-        <p className="mt-2 text-xs text-zinc-600">
-          5-minute bars are saved to disk as the engine runs. Longer ranges fill in over hours and
-          days.
-        </p>
+        <p className="text-zinc-400">Mark history warming up for {range}…</p>
+        <p className="mt-2 text-xs text-zinc-600">The chart fills in as settlement marks are recorded.</p>
       </div>
     );
   }

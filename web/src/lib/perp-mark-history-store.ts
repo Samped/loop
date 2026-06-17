@@ -1,7 +1,8 @@
 import "server-only";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import type { MarkCandle, MarkTick } from "@/lib/perp-mark-candles";
+import type { ChartRange, MarkCandle, MarkTick } from "@/lib/perp-mark-candles";
+import { getRangeWindowMs } from "@/lib/perp-mark-candles";
 import { getNeonSql } from "@/lib/neon";
 import { isNeonCircuitOpen, tripNeonCircuit, withNeonGuard } from "@/lib/neon-guard";
 import { PERP_MARKET_TICKERS } from "@/lib/perp-markets";
@@ -26,8 +27,8 @@ const BUNDLE_PATH = join(process.cwd(), "public", "perp-mark-cache.json");
 const BAR_MS = 5 * 60_000;
 /** ~120 days of 5m bars per ticker on disk. */
 const MAX_BARS = 120 * 24 * 12;
-/** Max bars synced to Neon per persist (latest bar only). */
-const NEON_SYNC_BARS = 1;
+/** Bars synced to Neon per persist — enough to backfill after deploys. */
+const NEON_SYNC_BARS = 48;
 const PERSIST_DEBOUNCE_MS = 15_000;
 
 let hydrated = false;
@@ -35,6 +36,7 @@ let barsByTicker: Record<string, StoredMarkBar[]> = {};
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let neonReady = false;
 let neonSyncInFlight = false;
+let hydratePromise: Promise<void> | null = null;
 
 function loadHistoryFile(path: string): HistoryFile | null {
   try {
@@ -91,10 +93,25 @@ function schedulePersist() {
   }, PERSIST_DEBOUNCE_MS);
 }
 
-export function hydratePerpMarkHistoryStore() {
+function mergeBarLists(a: StoredMarkBar[], b: StoredMarkBar[]): StoredMarkBar[] {
+  const map = new Map<number, StoredMarkBar>();
+  for (const bar of [...a, ...b]) {
+    const existing = map.get(bar.t);
+    if (!existing || bar.n >= existing.n) map.set(bar.t, bar);
+  }
+  return pruneBars([...map.values()].sort((x, y) => x.t - y.t));
+}
+
+/** Await before serving chart candles — loads Neon without wiping the bundled cache. */
+export function ensurePerpMarkHistoryReady(): Promise<void> {
   ensureHydrated();
   seedEmptyHistoryStores();
-  void hydratePerpMarkHistoryFromNeon();
+  if (!hydratePromise) hydratePromise = hydratePerpMarkHistoryFromNeon();
+  return hydratePromise;
+}
+
+export function hydratePerpMarkHistoryStore() {
+  void ensurePerpMarkHistoryReady();
 }
 
 async function hydratePerpMarkHistoryFromNeon() {
@@ -134,12 +151,12 @@ async function hydratePerpMarkHistoryFromNeon() {
         n: Number(row.ticks),
       });
     }
-    for (const ticker of Object.keys(next)) {
-      next[ticker] = pruneBars(next[ticker]!);
+    const merged: Record<string, StoredMarkBar[]> = { ...barsByTicker };
+    for (const ticker of PERP_MARKET_TICKERS) {
+      const upper = ticker.toUpperCase();
+      merged[upper] = mergeBarLists(barsByTicker[upper] ?? [], next[upper] ?? []);
     }
-    if (Object.values(next).some((list) => list.length > 0)) {
-      barsByTicker = next;
-    }
+    barsByTicker = merged;
   } catch {
     tripNeonCircuit();
   }
@@ -148,9 +165,11 @@ async function hydratePerpMarkHistoryFromNeon() {
 export async function persistPerpMarkHistory() {
   ensureHydrated();
   seedEmptyHistoryStores();
-  const dir = dirname(STORE_PATH);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(STORE_PATH, JSON.stringify({ updatedAt: Date.now(), bars: barsByTicker }));
+  if (!process.env.VERCEL) {
+    const dir = dirname(STORE_PATH);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(STORE_PATH, JSON.stringify({ updatedAt: Date.now(), bars: barsByTicker }));
+  }
 
   queueNeonPersist();
 }
@@ -244,6 +263,28 @@ export function getStoredMarkBars(ticker: string, sinceMs = 0): StoredMarkBar[] 
   const list = barsByTicker[ticker.toUpperCase()] ?? [];
   if (sinceMs <= 0) return [...list];
   return list.filter((b) => b.t >= sinceMs);
+}
+
+function minBarsForRange(range: ChartRange): number {
+  if (range === "5M") return 6;
+  if (range === "15M") return 12;
+  if (range === "1H") return 12;
+  if (range === "4H") return 48;
+  const windowMs = getRangeWindowMs(range) ?? 24 * 60 * 60_000;
+  return Math.min(Math.ceil(windowMs / BAR_MS), MAX_BARS);
+}
+
+/** Stored bars for charting — count fallback when the time window is empty on serverless. */
+export function getStoredBarsForChart(ticker: string, range: ChartRange): StoredMarkBar[] {
+  const windowMs = getRangeWindowMs(range) ?? 90 * 24 * 60 * 60_000;
+  const since = Date.now() - windowMs;
+  const inWindow = getStoredMarkBars(ticker, since);
+  const minBars = minBarsForRange(range);
+  if (inWindow.length >= minBars) return inWindow;
+
+  const all = getStoredMarkBars(ticker, 0);
+  const recent = all.slice(-minBars);
+  return recent.length > inWindow.length ? recent : inWindow;
 }
 
 /** Restore recent chart context after server restart (minute-level from 5m closes). */

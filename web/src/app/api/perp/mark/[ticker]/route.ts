@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { synthesizeMarkCandle } from "@/lib/perp-mark-chart-server";
+import {
+  synthesizeMarkCandlesFromPrice,
+} from "@/lib/perp-mark-chart-server";
 import {
   advancePerpMark,
   getPerpMarkCandles,
-  getPerpMarkSnapshot,
   parseChartRange,
 } from "@/lib/perp-mark-engine";
+import { ensurePerpMarkHistoryReady } from "@/lib/perp-mark-history-store";
 import { startPerpMarkEngine } from "@/lib/perp-mark-engine-runner";
 import { isPerpMarketTicker } from "@/lib/perp-markets";
 import { rateLimit } from "@/lib/api-guard";
@@ -30,19 +32,17 @@ export async function GET(req: Request, { params }: Params) {
   }
 
   startPerpMarkEngine();
+  await ensurePerpMarkHistoryReady();
 
   const range = rangeFromUrl(req.url);
-  let snap = getPerpMarkSnapshot(upper);
-  if (!snap) {
-    snap = await advancePerpMark(upper);
-  }
+  const snap = await advancePerpMark(upper);
   if (!snap) {
     return NextResponse.json({ error: "Mark unavailable" }, { status: 404 });
   }
 
   let candles = getPerpMarkCandles(upper, range);
   if (!candles.length && snap.price > 0) {
-    candles = [synthesizeMarkCandle(snap.price, snap.updatedAt)];
+    candles = synthesizeMarkCandlesFromPrice(snap.price, range, snap.updatedAt);
   }
   return NextResponse.json(
     { ...snap, range, candles },
